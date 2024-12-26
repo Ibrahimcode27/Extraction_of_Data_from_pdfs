@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload PDF</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Upload PDF</h1>
+            <form action="/success" method="post" enctype="multipart/form-data">
+                <label for="file">Select PDF:</label>
+                <input type="file" name="file" id="file" accept=".pdf" required><br><br>
+
+                <label for="exam_type">Select Exam Type:</label>
+                <select name="exam_type" id="exam_type" required>
+                    <option value="JEE">JEE</option>
+                    <option value="NEET">NEET</option>
+                    <option value="GATE">GATE</option>
+                    <option value="Other">Other</option>
+                </select><br><br>
+
+                <label for="subject">Select Subject:</label>
+                <select name="subject" id="subject" required>
+                    <option value="Physics">Physics</option>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Biology">Biology</option>
+                    <option value="Other">Other</option>
+                </select><br><br>
+
+                <button type="submit">Upload</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

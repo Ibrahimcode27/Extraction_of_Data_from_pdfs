@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Predictions</title>
+    <style>
+        /* General Reset */
+        body, html {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+            background-color: #f8f9fa; /* Light gray background */
+        }
+
+        /* Centered container */
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        /* Image and checkbox wrapper */
+        .image-wrapper {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        .image-card {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 200px;
+            cursor: pointer;
+        }
+
+        .image-card img {
+            width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+
+        .image-card label {
+            display: block;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #555;
+        }
+
+        /* Select All and Submit */
+        .form-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        .form-actions button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+            cursor: pointer;
+        }
+
+        .form-actions button:hover {
+            background-color: #0056b3;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal img {
+            max-width: 90%;
+            max-height: 90%;
+            border: 5px solid white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal .close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 30px;
+            color: white;
+            cursor: pointer;
+        }
+    </style>
+    <script>
+        // Open the modal with the clicked image
+        function openModal(src) {
+            const modal = document.getElementById("imageModal");
+            const modalImage = document.getElementById("modalImage");
+            modal.style.display = "flex";
+            modalImage.src = src; // Set the clicked image's src to the modal image
+        }
+
+        // Close the modal
+        function closeModal() {
+            const modal = document.getElementById("imageModal");
+            modal.style.display = "none";
+        }
+
+        // Toggle "Select All" functionality
+        function toggleSelectAll(source) {
+            const checkboxes = document.querySelectorAll('input[name="verified_crops"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = source.checked;
+            });
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Verify Predictions</h1>
+        <form action="/verify" method="POST">
+            <!-- Select All Checkbox -->
+            <div class="form-actions">
+                <label>
+                    <input type="checkbox" id="select_all" onclick="toggleSelectAll(this)">
+                    Select All
+                </label>
+                <button type="submit">Submit Verification</button>
+            </div>
+            <hr>
+
+            <!-- Images and Confirm Checkboxes -->
+            <div class="image-wrapper">
+                {% for path in image_paths %}
+                <div class="image-card" onclick="openModal('{{ path }}')">
+                    <img src="{{ path }}" alt="Predicted Image">
+                    <label>
+                        <input type="checkbox" name="verified_crops" value="{{ path }}">
+                        Confirm
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Submit Button at the Bottom -->
+            <div class="form-actions" style="margin-top: 20px;">
+                <button type="submit">Submit Verification</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Modal for Image Zoom -->
+    <div id="imageModal" class="modal" onclick="closeModal()">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <img id="modalImage" src="" alt="Zoomed Image">
+    </div>
+</body>
+</html>

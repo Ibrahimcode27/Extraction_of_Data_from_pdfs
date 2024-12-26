@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Annotation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            text-align: center;
+            padding: 20px;
+        }
+
+        #image-container {
+            position: relative;
+            display: inline-block;
+            border: 2px solid #ccc;
+        }
+
+        #image {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+        }
+
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Annotate Image</h1>
+    <div id="image-container">
+        <img id="image" src="{{ image_path }}" alt="Image to Annotate">
+        <canvas id="canvas"></canvas>
+    </div>
+    <form id="annotationForm" action="/annotate" method="POST">
+        <input type="hidden" name="image_path" value="{{ image_path }}">
+        <input type="hidden" id="annotations" name="annotations">
+        <button type="button" onclick="submitAnnotations()">Submit Annotations</button>
+    </form>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const image = document.getElementById('image');
+        const form = document.getElementById('annotationForm');
+        const annotationsInput = document.getElementById('annotations');
+        let ctx = canvas.getContext('2d');
+
+        // Resize canvas to match image dimensions
+        function adjustCanvas() {
+            canvas.width = image.width;
+            canvas.height = image.height;
+        }
+
+        adjustCanvas();
+
+        let isDrawing = false;
+        let startX, startY, endX, endY;
+        let annotations = [];
+
+        // Start drawing
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+        });
+
+        // Draw the rectangle
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            endX = e.clientX - rect.left;
+            endY = e.clientY - rect.top;
+
+            // Clear canvas and redraw annotations
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            annotations.forEach(([x1, y1, x2, y2]) => {
+                ctx.strokeStyle = 'green';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            });
+
+            // Draw the current rectangle
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+        });
+
+        // Stop drawing and save the rectangle
+        canvas.addEventListener('mouseup', () => {
+            if (isDrawing) {
+                isDrawing = false;
+
+                // Round and save annotation coordinates as integers
+                const roundedAnnotation = [
+                    Math.round(startX),
+                    Math.round(startY),
+                    Math.round(endX),
+                    Math.round(endY)
+                ];
+
+                annotations.push(roundedAnnotation);
+            }
+        });
+
+        // Submit annotations to the server
+        function submitAnnotations() {
+            annotationsInput.value = JSON.stringify(annotations);
+            form.submit();
+        }
+
+        // Adjust canvas size on window resize
+        window.addEventListener('resize', adjustCanvas);
+    </script>
+</body>
+</html>

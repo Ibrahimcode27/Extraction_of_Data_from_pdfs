@@ -3,46 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manual Annotation</title>
+    <title>Annotation Tool</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            background-color: #f9f9f9;
             text-align: center;
-            padding: 20px;
+            margin: 0;
+            padding: 0;
+            background-color: #f8f9fa;
+        }
+
+        h1 {
+            margin: 20px 0;
+            font-size: 24px;
+            color: #333;
         }
 
         #image-container {
             position: relative;
             display: inline-block;
-            border: 2px solid #ccc;
+            margin-top: 20px;
         }
 
         #image {
-            display: block;
-            max-width: 100%;
-            height: auto;
+            width: 600px;
+            border: 1px solid #ccc;
         }
 
         #canvas {
             position: absolute;
             top: 0;
             left: 0;
-            cursor: crosshair;
         }
 
-        button {
-            margin-top: 20px;
+        #class-selector {
+            display: none;
+            margin: 20px auto;
+        }
+
+        select {
+            padding: 10px;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        .button {
             padding: 10px 20px;
-            background-color: #007bff;
-            color: white;
+            font-size: 16px;
+            color: #fff;
             border: none;
             border-radius: 5px;
             cursor: pointer;
+            margin: 5px;
         }
 
-        button:hover {
-            background-color: #0056b3;
+        .button-primary {
+            background-color: #007bff;
+        }
+
+        .button-danger {
+            background-color: #dc3545;
+        }
+
+        .button-secondary {
+            background-color: #6c757d;
+        }
+
+        .button:hover {
+            opacity: 0.9;
         }
     </style>
 </head>
@@ -52,85 +80,138 @@
         <img id="image" src="{{ image_path }}" alt="Image to Annotate">
         <canvas id="canvas"></canvas>
     </div>
+
+    <div id="class-selector">
+        <select id="class-dropdown">
+            <option value="">Select Class</option>
+            <option value="diagram">Diagram</option>
+            <option value="quiz">Quiz</option>
+            <option value="solution">Solution</option>
+        </select>
+        <button class="button button-primary" onclick="saveAnnotation()">Save</button>
+        <button class="button button-danger" onclick="discardAnnotation()">Discard</button>
+    </div>
+
     <form id="annotationForm" action="/annotate" method="POST">
         <input type="hidden" name="image_path" value="{{ image_path }}">
         <input type="hidden" id="annotations" name="annotations">
-        <button type="button" onclick="submitAnnotations()">Submit Annotations</button>
+        <input type="hidden" id="class_names" name="class_names">
+        <button class="button button-secondary" type="button" onclick="submitAnnotations()">Submit</button>
     </form>
 
     <script>
         const canvas = document.getElementById('canvas');
         const image = document.getElementById('image');
-        const form = document.getElementById('annotationForm');
+        const classSelector = document.getElementById('class-selector');
+        const classDropdown = document.getElementById('class-dropdown');
         const annotationsInput = document.getElementById('annotations');
-        let ctx = canvas.getContext('2d');
+        const classNamesInput = document.getElementById('class_names');
+        const ctx = canvas.getContext('2d');
 
-        // Resize canvas to match image dimensions
+        let annotations = [];
+        let classNames = [];
+        let isDrawing = false;
+        let startX, startY, currentAnnotation = null;
+
         function adjustCanvas() {
-            canvas.width = image.width;
-            canvas.height = image.height;
+            canvas.width = image.clientWidth;
+            canvas.height = image.clientHeight;
         }
 
-        adjustCanvas();
+        window.onload = adjustCanvas;
+        window.onresize = adjustCanvas;
 
-        let isDrawing = false;
-        let startX, startY, endX, endY;
-        let annotations = [];
-
-        // Start drawing
         canvas.addEventListener('mousedown', (e) => {
-            isDrawing = true;
             const rect = canvas.getBoundingClientRect();
             startX = e.clientX - rect.left;
             startY = e.clientY - rect.top;
+            isDrawing = true;
         });
 
-        // Draw the rectangle
         canvas.addEventListener('mousemove', (e) => {
             if (!isDrawing) return;
-            const rect = canvas.getBoundingClientRect();
-            endX = e.clientX - rect.left;
-            endY = e.clientY - rect.top;
 
-            // Clear canvas and redraw annotations
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             annotations.forEach(([x1, y1, x2, y2]) => {
-                ctx.strokeStyle = 'green';
+                ctx.strokeStyle = 'red';
                 ctx.lineWidth = 2;
                 ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
             });
 
-            // Draw the current rectangle
-            ctx.strokeStyle = 'red';
+            ctx.strokeStyle = 'blue';
             ctx.lineWidth = 2;
             ctx.strokeRect(startX, startY, endX - startX, endY - startY);
         });
 
-        // Stop drawing and save the rectangle
-        canvas.addEventListener('mouseup', () => {
-            if (isDrawing) {
-                isDrawing = false;
+        canvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
 
-                // Round and save annotation coordinates as integers
-                const roundedAnnotation = [
-                    Math.round(startX),
-                    Math.round(startY),
-                    Math.round(endX),
-                    Math.round(endY)
-                ];
+            const rect = canvas.getBoundingClientRect();
+            const endX = e.clientX - rect.left;
+            const endY = e.clientY - rect.top;
 
-                annotations.push(roundedAnnotation);
-            }
+            currentAnnotation = [Math.round(startX), Math.round(startY), Math.round(endX), Math.round(endY)];
+            annotations.push(currentAnnotation);
+
+            classSelector.style.display = 'block';
+            isDrawing = false;
         });
 
-        // Submit annotations to the server
-        function submitAnnotations() {
-            annotationsInput.value = JSON.stringify(annotations);
-            form.submit();
+        function saveAnnotation() {
+            const className = classDropdown.value;
+            if (!className) {
+                alert('Please select a class!');
+                return;
+            }
+
+            classNames.push(className);
+            classSelector.style.display = 'none';
+            classDropdown.value = '';
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            annotations.forEach(([x1, y1, x2, y2]) => {
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            });
         }
 
-        // Adjust canvas size on window resize
-        window.addEventListener('resize', adjustCanvas);
+        function discardAnnotation() {
+            if (annotations.length === 0) {
+                alert('No annotation to discard!');
+                return;
+            }
+
+            annotations.pop();
+            if (classNames.length > annotations.length) {
+                classNames.pop();
+            }
+
+            classSelector.style.display = 'none';
+            classDropdown.value = '';
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            annotations.forEach(([x1, y1, x2, y2]) => {
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            });
+        }
+
+        function submitAnnotations() {
+            if (annotations.length === 0 || annotations.length !== classNames.length) {
+                alert('Please complete all annotations with class assignments.');
+                return;
+            }
+
+            annotationsInput.value = JSON.stringify(annotations);
+            classNamesInput.value = JSON.stringify(classNames);
+            document.getElementById('annotationForm').submit();
+        }
     </script>
 </body>
 </html>

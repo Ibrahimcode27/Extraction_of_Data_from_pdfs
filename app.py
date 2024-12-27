@@ -56,7 +56,9 @@ def run_yolo_and_save_with_boxes(image_paths, model_path="best.pt", output_dir="
         orig_height, orig_width = original_image.shape[:2]
 
         results = model(image_path)
-        print(f"Results for {image_path}: {results}")  # Debug: Print raw YOLO results
+
+        # Adjust predictions to use static/temp_images paths
+        temp_image_path = os.path.join("static/temp_images", os.path.basename(image_path)).replace("\\", "/")
 
         for box in results[0].boxes:
             bbox = box.xyxy[0].tolist()
@@ -65,25 +67,24 @@ def run_yolo_and_save_with_boxes(image_paths, model_path="best.pt", output_dir="
             class_name = model.names[class_id]
 
             # Adjust bounding box coordinates
-            x_min = int(bbox[0] * orig_width / results[0].orig_shape[1])
-            y_min = int(bbox[1] * orig_height / results[0].orig_shape[0])
-            x_max = int(bbox[2] * orig_width / results[0].orig_shape[1])
-            y_max = int(bbox[3] * orig_height / results[0].orig_shape[0])
+            x_min = int(bbox[0])
+            y_min = int(bbox[1])
+            x_max = int(bbox[2])
+            y_max = int(bbox[3])
 
-            predictions.setdefault(image_path.replace('\\', '/'), []).append({
+            # Store predictions using temp_image_path
+            predictions.setdefault(temp_image_path, []).append({
                 "class": class_name,
                 "bbox": [x_min, y_min, x_max, y_max],
                 "confidence": confidence
             })
 
-            # Debug: Print each bounding box
-            print(f"Image: {image_path}, Class: {class_name}, BBox: {x_min, y_min, x_max, y_max}, Confidence: {confidence:.2f}")
-
-            # Draw the bounding box on the original image
-            cv2.rectangle(original_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 10)
+            # Draw bounding boxes on the output image
+            cv2.rectangle(original_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 15)
             cv2.putText(original_image, f"{class_name} {confidence:.2f}",
-                        (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 2.5, (255, 0, 0), 8)
+                        (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 2.9, (255, 0, 0), 10)
 
+        # Save the processed image with bounding boxes
         output_path = os.path.join(output_dir, os.path.basename(image_path))
         cv2.imwrite(output_path, original_image)
 
@@ -201,7 +202,7 @@ def verify_crops():
         if not processed_images:
             return "No images found to verify.", 400
 
-        # Render the verification page with the image paths
+        # Render the verification page with image paths
         return render_template('verify.html', image_paths=processed_images)
 
     elif request.method == 'POST':
@@ -214,38 +215,34 @@ def verify_crops():
         if not predictions:
             return "Predictions not found. Please process the images again.", 400
 
+        # Define output directory for verified crops
         output_dir = "./static/verified_crops"
         os.makedirs(output_dir, exist_ok=True)
 
         unverified_images = []
 
         # Process and save verified images
-        for image_filename in predictions.keys():
-            prediction_list = predictions.get(image_filename)
-            if not prediction_list:
-                continue
-
-            img_path = os.path.join("static/temp_images", os.path.basename(image_filename))
+        for image_path, prediction_list in predictions.items():
+            img_path = image_path.replace("\\", "/")  # Ensure consistent path format
             img = cv2.imread(img_path)
             if img is None:
                 print(f"Failed to load image: {img_path}")
                 continue
 
-            if os.path.basename(image_filename) in verified_images:
+            if os.path.basename(image_path) in verified_images:
                 # Save verified crops
                 for prediction in prediction_list:
                     class_name = prediction['class']
-                    bbox = prediction['bbox']
-                    x_min, y_min, x_max, y_max = bbox
+                    x_min, y_min, x_max, y_max = map(int, prediction['bbox'])
 
                     cropped = img[y_min:y_max, x_min:x_max]
                     if cropped.size == 0:
-                        print(f"Invalid crop for bbox: {bbox}")
+                        print(f"Invalid crop for bbox: {prediction['bbox']}")
                         continue
 
                     class_dir = os.path.join(output_dir, class_name)
                     os.makedirs(class_dir, exist_ok=True)
-                    crop_filename = os.path.join(class_dir, f"{image_filename}_{x_min}_{y_min}.png")
+                    crop_filename = os.path.join(class_dir, f"{os.path.basename(image_path)}_{x_min}_{y_min}.png")
                     cv2.imwrite(crop_filename, cropped)
             else:
                 # Add to unverified images
@@ -260,60 +257,47 @@ def verify_crops():
 @app.route('/annotate', methods=['GET', 'POST'])
 def annotate():
     if request.method == 'GET':
-        # Debugging: Print session data
         unverified_images = session.get('unverified_images', [])
-        print(f"Session unverified_images: {unverified_images}")
-
         if not unverified_images:
-            print("No unverified images found in session.")
-            return "No more images to annotate.", 200
+            return redirect(url_for('annotation_complete'))
 
-        # Get the current image
         current_image = unverified_images[0]
-        print(f"Current image for annotation: {current_image}")
-
-        # Render annotate.html with the current image path
         return render_template('annotate.html', image_path=current_image)
 
     elif request.method == 'POST':
-        # Debugging: Print POST data
-        print(f"POST data: {request.form}")
-
-        # Save manually drawn annotations
         image_path = request.form['image_path']
-        annotations = json.loads(request.form['annotations'])  # JSON list of bounding boxes
-        class_name = request.form['class_name']  # Class name provided by the user
+        annotations = json.loads(request.form['annotations'])
+        class_names = json.loads(request.form['class_names'])
 
-        # Ensure class-specific directory exists
-        output_dir = os.path.join('static', 'verified_crops', class_name)
-        os.makedirs(output_dir, exist_ok=True)
+        if len(annotations) != len(class_names):
+            return "Mismatch between annotations and class names.", 400
 
-        # Debugging: Print received annotations
-        print(f"Received annotations: {annotations}")
+        for annotation, class_name in zip(annotations, class_names):
+            x_min, y_min, x_max, y_max = map(int, annotation)
+            output_dir = os.path.join('static', 'verified_crops', class_name)
+            os.makedirs(output_dir, exist_ok=True)
+            image = cv2.imread(image_path)
+            if image is None:
+                print(f"Failed to load image: {image_path}")
+                continue
 
-        # Crop and save manually annotated regions
-        image = cv2.imread(os.path.join('static', image_path))
-        if image is None:
-            print(f"Failed to load image: {image_path}")
-        else:
-            for annotation in annotations:
-                x_min, y_min, x_max, y_max = annotation
-                cropped = image[y_min:y_max, x_min:x_max]
+            cropped = image[y_min:y_max, x_min:x_max]
+            cropped_filename = f"{os.path.basename(image_path).split('.')[0]}_{x_min}_{y_min}.png"
+            cropped_path = os.path.join(output_dir, cropped_filename)
+            cv2.imwrite(cropped_path, cropped)
 
-                # Save the cropped image
-                cropped_path = os.path.join(output_dir, f"{os.path.basename(image_path)}_{x_min}_{y_min}.png")
-                cv2.imwrite(cropped_path, cropped)
-                print(f"Saved cropped image: {cropped_path}")
-
-        # Remove the processed image from unverified list
+        unverified_images = session.get('unverified_images', [])
         unverified_images.pop(0)
         session['unverified_images'] = unverified_images
 
-        # Redirect to the next image or finish annotation
         if unverified_images:
             return redirect(url_for('annotate'))
         else:
-            return "Annotation completed successfully!"
+            return redirect(url_for('annotation_complete'))
+
+@app.route('/annotation_complete', methods=['GET'])
+def annotation_complete():
+    return "Annotation process completed successfully!"
 
 if __name__ == "__main__":
     app.run(debug=True)

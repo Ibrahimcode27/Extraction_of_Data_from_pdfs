@@ -3,31 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Annotation Tool</title>
+    <title>Annotate</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            text-align: center;
-            margin: 0;
-            padding: 0;
-            background-color: #f8f9fa;
-        }
-
-        h1 {
-            margin: 20px 0;
-            font-size: 24px;
-            color: #333;
         }
 
         #image-container {
             position: relative;
             display: inline-block;
-            margin-top: 20px;
         }
 
         #image {
-            width: 600px;
-            border: 1px solid #ccc;
+            max-width: 100%;
+            max-height: 80vh;
         }
 
         #canvas {
@@ -37,40 +26,32 @@
         }
 
         #class-selector {
+            margin-top: 10px;
             display: none;
-            margin: 20px auto;
-        }
-
-        select {
-            padding: 10px;
-            font-size: 16px;
-            margin-right: 10px;
         }
 
         .button {
-            padding: 10px 20px;
+            padding: 8px 15px;
             font-size: 16px;
-            color: #fff;
             border: none;
-            border-radius: 5px;
             cursor: pointer;
-            margin: 5px;
+            margin-right: 5px;
+            border-radius: 5px;
         }
 
         .button-primary {
-            background-color: #007bff;
+            background-color: #4CAF50;
+            color: white;
         }
 
         .button-danger {
-            background-color: #dc3545;
+            background-color: #f44336;
+            color: white;
         }
 
         .button-secondary {
-            background-color: #6c757d;
-        }
-
-        .button:hover {
-            opacity: 0.9;
+            background-color: #008CBA;
+            color: white;
         }
     </style>
 </head>
@@ -80,7 +61,6 @@
         <img id="image" src="{{ image_path }}" alt="Image to Annotate">
         <canvas id="canvas"></canvas>
     </div>
-
     <div id="class-selector">
         <select id="class-dropdown">
             <option value="">Select Class</option>
@@ -91,7 +71,6 @@
         <button class="button button-primary" onclick="saveAnnotation()">Save</button>
         <button class="button button-danger" onclick="discardAnnotation()">Discard</button>
     </div>
-
     <form id="annotationForm" action="/annotate" method="POST">
         <input type="hidden" name="image_path" value="{{ image_path }}">
         <input type="hidden" id="annotations" name="annotations">
@@ -110,17 +89,23 @@
 
         let annotations = [];
         let classNames = [];
-        let isDrawing = false;
-        let startX, startY, currentAnnotation = null;
+        let startX, startY, isDrawing = false, currentAnnotation;
+        let scaleX = 1, scaleY = 1;
 
+        // Adjust canvas to match the displayed image size
         function adjustCanvas() {
             canvas.width = image.clientWidth;
             canvas.height = image.clientHeight;
+
+            // Calculate scaling factors
+            scaleX = image.naturalWidth / canvas.width;
+            scaleY = image.naturalHeight / canvas.height;
         }
 
         window.onload = adjustCanvas;
         window.onresize = adjustCanvas;
 
+        // Start drawing
         canvas.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             startX = e.clientX - rect.left;
@@ -128,6 +113,7 @@
             isDrawing = true;
         });
 
+        // Draw rectangle
         canvas.addEventListener('mousemove', (e) => {
             if (!isDrawing) return;
 
@@ -147,6 +133,7 @@
             ctx.strokeRect(startX, startY, endX - startX, endY - startY);
         });
 
+        // Finish drawing
         canvas.addEventListener('mouseup', (e) => {
             if (!isDrawing) return;
 
@@ -161,6 +148,7 @@
             isDrawing = false;
         });
 
+        // Save the annotation
         function saveAnnotation() {
             const className = classDropdown.value;
             if (!className) {
@@ -172,6 +160,7 @@
             classSelector.style.display = 'none';
             classDropdown.value = '';
 
+            // Redraw the annotations after saving
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             annotations.forEach(([x1, y1, x2, y2]) => {
                 ctx.strokeStyle = 'red';
@@ -180,6 +169,7 @@
             });
         }
 
+        // Discard current annotation
         function discardAnnotation() {
             if (annotations.length === 0) {
                 alert('No annotation to discard!');
@@ -208,8 +198,16 @@
                 return;
             }
 
-            annotationsInput.value = JSON.stringify(annotations);
-            classNamesInput.value = JSON.stringify(classNames);
+            // Scale annotations to the original image dimensions
+            const scaledAnnotations = annotations.map(([x1, y1, x2, y2], index) => ({
+                x1: Math.round(x1 * scaleX),
+                y1: Math.round(y1 * scaleY),
+                x2: Math.round(x2 * scaleX),
+                y2: Math.round(y2 * scaleY),
+                class_name: classNames[index],
+            }));
+
+            annotationsInput.value = JSON.stringify(scaledAnnotations);
             document.getElementById('annotationForm').submit();
         }
     </script>

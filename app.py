@@ -12,7 +12,6 @@ app = Flask(__name__)
 app.secret_key = 'your_secret_key'  # Replace with a secure key
 
 # Directories
-
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
@@ -257,43 +256,81 @@ def verify_crops():
 @app.route('/annotate', methods=['GET', 'POST'])
 def annotate():
     if request.method == 'GET':
+        # Retrieve unverified images from session
         unverified_images = session.get('unverified_images', [])
         if not unverified_images:
-            return redirect(url_for('annotation_complete'))
+            return "No more images to annotate.", 200
 
+        # Display the first unverified image
         current_image = unverified_images[0]
-        return render_template('annotate.html', image_path=current_image)
+        original_image = cv2.imread(current_image)
+
+        if original_image is None:
+            # Handle missing or inaccessible image
+            unverified_images.pop(0)  # Remove the broken image
+            session['unverified_images'] = unverified_images
+            return "The current image could not be loaded. Skipping to the next image.", 400
+
+        # Save canvas size in session for scaling annotations
+        canvas_width, canvas_height = 800, 600  # Example default dimensions
+        session['canvas_size'] = (canvas_width, canvas_height)
+
+        return render_template(
+            'annotate.html',
+            image_path=current_image,
+            canvas_size=(canvas_width, canvas_height),
+        )
 
     elif request.method == 'POST':
-        image_path = request.form['image_path']
-        annotations = json.loads(request.form['annotations'])
-        class_names = json.loads(request.form['class_names'])
+        try:
+            # Retrieve JSON strings from the form
+            image_path = request.form.get('image_path', '')
+            annotations = request.form.get('annotations', '[]')
 
-        if len(annotations) != len(class_names):
-            return "Mismatch between annotations and class names.", 400
+            # Decode JSON
+            annotations = json.loads(annotations)
 
-        for annotation, class_name in zip(annotations, class_names):
-            x_min, y_min, x_max, y_max = map(int, annotation)
-            output_dir = os.path.join('static', 'verified_crops', class_name)
-            os.makedirs(output_dir, exist_ok=True)
-            image = cv2.imread(image_path)
-            if image is None:
-                print(f"Failed to load image: {image_path}")
-                continue
+            # Validate annotations
+            if not annotations:
+                return "No annotations submitted. Please try again.", 400
 
-            cropped = image[y_min:y_max, x_min:x_max]
-            cropped_filename = f"{os.path.basename(image_path).split('.')[0]}_{x_min}_{y_min}.png"
-            cropped_path = os.path.join(output_dir, cropped_filename)
-            cv2.imwrite(cropped_path, cropped)
+            # Process each annotation
+            for annotation in annotations:
+                x1, y1, x2, y2 = annotation['x1'], annotation['y1'], annotation['x2'], annotation['y2']
+                class_name = annotation['class_name']
 
-        unverified_images = session.get('unverified_images', [])
-        unverified_images.pop(0)
-        session['unverified_images'] = unverified_images
+                # Load image
+                img = cv2.imread(image_path)
+                if img is None:
+                    return f"Image {image_path} not found.", 400
 
-        if unverified_images:
-            return redirect(url_for('annotate'))
-        else:
-            return redirect(url_for('annotation_complete'))
+                # Crop and save
+                cropped = img[y1:y2, x1:x2]
+                if cropped.size == 0:
+                    continue
+
+                output_dir = os.path.join('static', 'verified_crops', class_name)
+                os.makedirs(output_dir, exist_ok=True)
+
+                crop_filename = os.path.join(output_dir, f"{os.path.basename(image_path)}_{x1}_{y1}.png")
+                cv2.imwrite(crop_filename, cropped)
+
+            # Update session for remaining unverified images
+            unverified_images = session.get('unverified_images', [])
+            if unverified_images:
+                unverified_images.pop(0)  # Remove the processed image
+                session['unverified_images'] = unverified_images
+
+            # Redirect to the next image or finish annotation
+            if unverified_images:
+                return redirect(url_for('annotate'))
+            else:
+                return redirect(url_for('annotation_complete'))
+
+        except json.JSONDecodeError:
+            return "Invalid JSON format in annotations.", 400
+        except Exception as e:
+            return f"An error occurred: {str(e)}", 500
 
 @app.route('/annotation_complete', methods=['GET'])
 def annotation_complete():

@@ -52,12 +52,14 @@ def run_yolo_and_save_with_boxes(image_paths, model_path="best.pt", output_dir="
 
     for image_path in image_paths:
         original_image = cv2.imread(image_path)
-        orig_height, orig_width = original_image.shape[:2]
+        if original_image is None:
+            print(f"Failed to load image: {image_path}")
+            continue
+
+        page_id = os.path.basename(image_path).split('.')[0]  # Use filename without extension as page ID
+        predictions[page_id] = []  # Initialize page annotations
 
         results = model(image_path)
-
-        # Adjust predictions to use static/temp_images paths
-        temp_image_path = os.path.join("static/temp_images", os.path.basename(image_path)).replace("\\", "/")
 
         for box in results[0].boxes:
             bbox = box.xyxy[0].tolist()
@@ -71,23 +73,89 @@ def run_yolo_and_save_with_boxes(image_paths, model_path="best.pt", output_dir="
             x_max = int(bbox[2])
             y_max = int(bbox[3])
 
-            # Store predictions using temp_image_path
-            predictions.setdefault(temp_image_path, []).append({
+            # Store prediction data
+            predictions[page_id].append({
                 "class": class_name,
-                "bbox": [x_min, y_min, x_max, y_max],
+                "path": image_path,
+                "y_min": y_min,
+                "y_max": y_max,
+                "x_min": x_min,
+                "x_max": x_max,
                 "confidence": confidence
             })
 
-            # Draw bounding boxes on the output image
-            cv2.rectangle(original_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 15)
+            # Draw bounding boxes on the image
+            cv2.rectangle(original_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
             cv2.putText(original_image, f"{class_name} {confidence:.2f}",
-                        (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 2.9, (255, 0, 0), 10)
+                        (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
 
-        # Save the processed image with bounding boxes
+        # Save processed image with bounding boxes
         output_path = os.path.join(output_dir, os.path.basename(image_path))
         cv2.imwrite(output_path, original_image)
 
     return predictions
+
+def save_question_diagram_links(annotation_data, output_dir="static/verified_crops", output_file="question_diagram_links.json"):
+    """
+    Links diagrams to questions based on containment logic and saves the mapping.
+
+    Args:
+        annotation_data (dict): Annotations grouped by page.
+        output_dir (str): Directory where verified crops are saved.
+        output_file (str): JSON file to save the mapping.
+    """
+    # Load existing links from the JSON file, if it exists
+    if os.path.exists(output_file):
+        with open(output_file, "r") as f:
+            linked_data = json.load(f)
+    else:
+        linked_data = []
+
+    new_links = []
+
+    for page_id, annotations in annotation_data.items():
+        # Separate questions and diagrams
+        questions = [a for a in annotations if a['class'] == 'quiz']
+        diagrams = [a for a in annotations if a['class'] == 'diagram']
+
+        for question in questions:
+            # Path for the cropped quiz image
+            question_cropped_path = os.path.join(output_dir, "quiz", f"{os.path.basename(question['path'])}_{question['x_min']}_{question['y_min']}.png")
+            
+            # Initialize with no linked diagram
+            linked_diagram = None
+
+            # Check for diagrams contained within this question's bounding box
+            for diagram in diagrams:
+                if (
+                    diagram['x_min'] >= question['x_min'] and
+                    diagram['x_max'] <= question['x_max'] and
+                    diagram['y_min'] >= question['y_min'] and
+                    diagram['y_max'] <= question['y_max']
+                ):
+                    # Diagram is fully inside the question box
+                    linked_diagram = os.path.join(output_dir, "diagram", f"{os.path.basename(diagram['path'])}_{diagram['x_min']}_{diagram['y_min']}.png")
+                    break  # Stop checking once we find a contained diagram
+
+            # Create the linked data entry
+            link = {
+                "page": page_id,
+                "question": question_cropped_path,
+                "diagram": linked_diagram  # Will be None if no diagram is contained
+            }
+
+            # Avoid duplicates
+            if link not in linked_data and link not in new_links:
+                new_links.append(link)
+
+    # Append new links to the existing data
+    linked_data.extend(new_links)
+
+    # Save the updated linked data back to the JSON file
+    with open(output_file, "w") as f:
+        json.dump(linked_data, f, indent=4)
+
+    print(f"Updated linked data saved to {output_file}")
 
 # Initialize database
 def init_db():
@@ -181,11 +249,14 @@ def process_pdf():
         # Step 2: Run YOLO and process predictions
         predictions = run_yolo_and_save_with_boxes(images)
 
+        # Step 3: Save predictions for linking
+        session['predictions'] = predictions  # Store predictions in session
+        save_question_diagram_links(predictions)  # Link questions and diagrams
+
         # Step 3: Save processed image paths
         processed_images = [os.path.join('static/output_with_boxes', os.path.basename(image)) for image in images]
         session['processed_images'] = [path.replace('\\', '/') for path in processed_images]  # Normalize paths
-        session['predictions'] = predictions
-
+        
         # Redirect to the verification page
         return redirect(url_for('verify_crops'))
     except Exception as e:
@@ -196,61 +267,70 @@ def process_pdf():
 @app.route('/verify', methods=['GET', 'POST'])
 def verify_crops():
     if request.method == 'GET':
-        # Retrieve processed image paths from the session
         processed_images = session.get('processed_images', [])
-        if not processed_images:
-            return "No images found to verify.", 400
+        predictions = session.get('predictions', {})
 
-        # Render the verification page with image paths
-        return render_template('verify.html', image_paths=processed_images)
+        if not processed_images or not predictions:
+            return "No images or predictions found to verify.", 400
+
+        # Pass predictions and processed images to the template for verification
+        return render_template('verify.html', image_paths=processed_images, predictions=predictions)
 
     elif request.method == 'POST':
-        # Retrieve verified image paths from the form submission
         verified_images = request.form.getlist('verified_crops')
         verified_images = [os.path.basename(image) for image in verified_images]
 
-        # Retrieve predictions from the session
         predictions = session.get('predictions', {})
         if not predictions:
             return "Predictions not found. Please process the images again.", 400
 
-        # Define output directory for verified crops
         output_dir = "./static/verified_crops"
         os.makedirs(output_dir, exist_ok=True)
 
-        unverified_images = []
+        verified_predictions = {}
 
-        # Process and save verified images
-        for image_path, prediction_list in predictions.items():
-            img_path = image_path.replace("\\", "/")  # Ensure consistent path format
-            img = cv2.imread(img_path)
-            if img is None:
-                print(f"Failed to load image: {img_path}")
-                continue
+        # Iterate through the predictions
+        for page_id, prediction_list in predictions.items():
+            verified_predictions[page_id] = []  # Initialize verified predictions for the page
+            for prediction in prediction_list:
+                if os.path.basename(prediction['path']) in verified_images:
+                    # Add to verified predictions
+                    verified_predictions[page_id].append(prediction)
 
-            if os.path.basename(image_path) in verified_images:
-                # Save verified crops
-                for prediction in prediction_list:
+                    # Save verified crops
+                    x_min, y_min, x_max, y_max = (
+                        int(prediction['x_min']),
+                        int(prediction['y_min']),
+                        int(prediction['x_max']),
+                        int(prediction['y_max']),
+                    )
                     class_name = prediction['class']
-                    x_min, y_min, x_max, y_max = map(int, prediction['bbox'])
+                    img = cv2.imread(prediction['path'])
+                    
+                    if img is None:
+                        print(f"Failed to load image: {prediction['path']}")
+                        continue
 
                     cropped = img[y_min:y_max, x_min:x_max]
                     if cropped.size == 0:
-                        print(f"Invalid crop for bbox: {prediction['bbox']}")
+                        print(f"Invalid crop for: {prediction}")
                         continue
 
+                    # Save the cropped image in the respective class directory
                     class_dir = os.path.join(output_dir, class_name)
                     os.makedirs(class_dir, exist_ok=True)
-                    crop_filename = os.path.join(class_dir, f"{os.path.basename(image_path)}_{x_min}_{y_min}.png")
+                    crop_filename = os.path.join(
+                        class_dir, f"{os.path.basename(prediction['path'])}_{x_min}_{y_min}.png"
+                    )
                     cv2.imwrite(crop_filename, cropped)
-            else:
-                # Add to unverified images
-                unverified_images.append(img_path)
 
-        # Save unverified images to session
-        session['unverified_images'] = unverified_images
+        # Save links only for verified predictions
+        save_question_diagram_links(verified_predictions)
 
-        # Redirect to /annotate after processing
+        # Update session with unverified images
+        session['unverified_images'] = [
+            prediction for page_id, preds in predictions.items() for prediction in preds if prediction not in verified_predictions[page_id]
+        ]
         return redirect(url_for('annotate'))
 
 @app.route('/annotate', methods=['GET', 'POST'])
@@ -259,31 +339,29 @@ def annotate():
         # Retrieve unverified images from session
         unverified_images = session.get('unverified_images', [])
         if not unverified_images:
-            return "No more images to annotate.", 200
+            return "No more images to annotate.", 200  # Return when no images are left
 
-        # Display the first unverified image
-        current_image = unverified_images[0]
-        original_image = cv2.imread(current_image)
+        # Extract the current image and its annotations
+        current_image_path = unverified_images[0]['path']
+        current_annotations = [anno for anno in unverified_images if anno['path'] == current_image_path]
 
-        if original_image is None:
-            # Handle missing or inaccessible image
-            unverified_images.pop(0)  # Remove the broken image
-            session['unverified_images'] = unverified_images
-            return "The current image could not be loaded. Skipping to the next image.", 400
+        # Debug: Print the current image and annotations
+        print(f"Annotating image: {current_image_path}")
+        print(f"Annotations: {current_annotations}")
 
-        # Save canvas size in session for scaling annotations
-        canvas_width, canvas_height = 800, 600  # Example default dimensions
-        session['canvas_size'] = (canvas_width, canvas_height)
+        # Save current annotations to the session for reference
+        session['current_annotations'] = current_annotations
 
+        # Render the annotation page
         return render_template(
             'annotate.html',
-            image_path=current_image,
-            canvas_size=(canvas_width, canvas_height),
+            image_path=current_image_path,
+            page_number=current_image_path.split('/')[-1].split('.')[0],  # Deduce page number
         )
 
     elif request.method == 'POST':
         try:
-            # Retrieve JSON strings from the form
+            # Retrieve annotations and image path from the form
             image_path = request.form.get('image_path', '')
             annotations = request.form.get('annotations', '[]')
 
@@ -294,42 +372,52 @@ def annotate():
             if not annotations:
                 return "No annotations submitted. Please try again.", 400
 
-            # Process each annotation
+            # Save each annotation as a cropped image
             for annotation in annotations:
                 x1, y1, x2, y2 = annotation['x1'], annotation['y1'], annotation['x2'], annotation['y2']
                 class_name = annotation['class_name']
 
-                # Load image
+                # Load the image
                 img = cv2.imread(image_path)
                 if img is None:
+                    print(f"Failed to load image: {image_path}")
                     return f"Image {image_path} not found.", 400
 
-                # Crop and save
+                # Crop the annotation
                 cropped = img[y1:y2, x1:x2]
                 if cropped.size == 0:
                     continue
 
+                # Save the cropped annotation
                 output_dir = os.path.join('static', 'verified_crops', class_name)
                 os.makedirs(output_dir, exist_ok=True)
 
                 crop_filename = os.path.join(output_dir, f"{os.path.basename(image_path)}_{x1}_{y1}.png")
                 cv2.imwrite(crop_filename, cropped)
 
-            # Update session for remaining unverified images
+            # Update session for remaining annotations in the current image
+            current_annotations = session.get('current_annotations', [])
             unverified_images = session.get('unverified_images', [])
-            if unverified_images:
-                unverified_images.pop(0)  # Remove the processed image
-                session['unverified_images'] = unverified_images
 
-            # Redirect to the next image or finish annotation
+            # Remove the processed annotations from unverified_images
+            unverified_images = [anno for anno in unverified_images if anno not in current_annotations]
+            session['unverified_images'] = unverified_images
+
+            # Update question-diagram links for the annotated page
+            page_predictions = {current_annotations[0]['path']: current_annotations}
+            save_question_diagram_links(page_predictions)
+
+            # Move to the next image or finish annotation
             if unverified_images:
                 return redirect(url_for('annotate'))
             else:
                 return redirect(url_for('annotation_complete'))
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
             return "Invalid JSON format in annotations.", 400
         except Exception as e:
+            print(f"Unexpected error: {e}")
             return f"An error occurred: {str(e)}", 500
 
 @app.route('/annotation_complete', methods=['GET'])

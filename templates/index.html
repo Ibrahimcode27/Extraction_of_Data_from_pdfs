@@ -5,6 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Upload PDF</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        // Predefined topics for each subject
+        const topicsBySubject = {
+            Physics: ["Mechanics", "Thermodynamics", "Electrodynamics", "Optics", "Quantum Physics"],
+            Chemistry: ["Organic Chemistry", "Inorganic Chemistry", "Physical Chemistry", "Biochemistry"],
+            Mathematics: ["Algebra", "Calculus", "Geometry", "Trigonometry", "Statistics"],
+            Biology: ["Cell Biology", "Genetics", "Ecology", "Human Anatomy", "Plant Physiology"],
+            Other: ["General Topics"]
+        };
+
+        // Populate topics based on the selected subject
+        function populateTopics() {
+            const subjectSelect = document.getElementById('subject');
+            const topicSelect = document.getElementById('topic');
+
+            // Clear existing options
+            topicSelect.innerHTML = '<option value="">Select Topic</option>';
+
+            // Get the selected subject
+            const selectedSubject = subjectSelect.value;
+
+            // Populate the topics dropdown
+            if (topicsBySubject[selectedSubject]) {
+                topicsBySubject[selectedSubject].forEach(topic => {
+                    const option = document.createElement('option');
+                    option.value = topic;
+                    option.textContent = topic;
+                    topicSelect.appendChild(option);
+                });
+            }
+        }
+    </script>
 </head>
 <body>
     <div class="container">
@@ -23,12 +55,17 @@
                 </select><br><br>
 
                 <label for="subject">Select Subject:</label>
-                <select name="subject" id="subject" required>
+                <select name="subject" id="subject" required onchange="populateTopics()">
                     <option value="Physics">Physics</option>
                     <option value="Chemistry">Chemistry</option>
                     <option value="Mathematics">Mathematics</option>
                     <option value="Biology">Biology</option>
                     <option value="Other">Other</option>
+                </select><br><br>
+
+                <label for="topic">Select Topic:</label>
+                <select name="topic" id="topic" required>
+                    <option value="">Select Topic</option>
                 </select><br><br>
 
                 <button type="submit">Upload</button>

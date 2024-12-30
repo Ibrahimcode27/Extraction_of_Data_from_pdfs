@@ -50,6 +50,9 @@
         <div class="card">
             <h1>Upload Successful!</h1>
             <p>File "<strong>{{ filename }}</strong>" has been uploaded successfully.</p>
+            <p>Subject: <strong>{{ subject }}</strong></p>
+            <p>Exam Type: <strong>{{ exam_type }}</strong></p>
+            <p>Topic: <strong>{{ topic }}</strong></p>
             <form action="/process" method="post">
                 <button type="submit" class="btn btn-primary" onclick="showLoading();">Proceed to Process</button>
                 <a href="/view_data" class="btn">View All Uploaded Data</a>

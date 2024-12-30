@@ -1,6 +1,7 @@
 import os
 import json
 from ultralytics import YOLO
+from paddleocr import PaddleOCR
 from flask import Flask, render_template, request, redirect, url_for, session
 from pdf2image import convert_from_path
 import cv2
@@ -22,6 +23,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Utility to check allowed file extensions
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+def normalize_path(path):
+    return path.replace("\\", "/")
 
 def convert_pdf_to_images(pdf_path, output_folder="static/temp_images"):
     """
@@ -96,15 +100,6 @@ def run_yolo_and_save_with_boxes(image_paths, model_path="best.pt", output_dir="
     return predictions
 
 def save_question_diagram_links(annotation_data, output_dir="static/verified_crops", output_file="question_diagram_links.json"):
-    """
-    Links diagrams to questions based on containment logic and saves the mapping.
-
-    Args:
-        annotation_data (dict): Annotations grouped by page.
-        output_dir (str): Directory where verified crops are saved.
-        output_file (str): JSON file to save the mapping.
-    """
-    # Load existing links from the JSON file, if it exists
     if os.path.exists(output_file):
         with open(output_file, "r") as f:
             linked_data = json.load(f)
@@ -114,18 +109,14 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
     new_links = []
 
     for page_id, annotations in annotation_data.items():
-        # Separate questions and diagrams
         questions = [a for a in annotations if a['class'] == 'quiz']
         diagrams = [a for a in annotations if a['class'] == 'diagram']
 
         for question in questions:
-            # Path for the cropped quiz image
             question_cropped_path = os.path.join(output_dir, "quiz", f"{os.path.basename(question['path'])}_{question['x_min']}_{question['y_min']}.png")
-            
-            # Initialize with no linked diagram
-            linked_diagram = None
+            question_cropped_path = normalize_path(question_cropped_path)
 
-            # Check for diagrams contained within this question's bounding box
+            linked_diagram = None
             for diagram in diagrams:
                 if (
                     diagram['x_min'] >= question['x_min'] and
@@ -133,43 +124,103 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
                     diagram['y_min'] >= question['y_min'] and
                     diagram['y_max'] <= question['y_max']
                 ):
-                    # Diagram is fully inside the question box
-                    linked_diagram = os.path.join(output_dir, "diagram", f"{os.path.basename(diagram['path'])}_{diagram['x_min']}_{diagram['y_min']}.png")
-                    break  # Stop checking once we find a contained diagram
+                    linked_diagram = normalize_path(
+                        os.path.join(output_dir, "diagram", f"{os.path.basename(diagram['path'])}_{diagram['x_min']}_{diagram['y_min']}.png")
+                    )
+                    break
 
-            # Create the linked data entry
+            # Add the PDF filename to the link
+            pdf_filename = os.path.basename(question['path']).split("_")[0] + ".pdf"
+            pdf_path = session.get('uploaded_pdf')
+            pdf_path = pdf_path.replace("static/uploads\\", "")
             link = {
                 "page": page_id,
                 "question": question_cropped_path,
-                "diagram": linked_diagram  # Will be None if no diagram is contained
+                "diagram": linked_diagram,
+                "pdf_filename": pdf_path
             }
 
-            # Avoid duplicates
             if link not in linked_data and link not in new_links:
                 new_links.append(link)
 
-    # Append new links to the existing data
     linked_data.extend(new_links)
-
-    # Save the updated linked data back to the JSON file
     with open(output_file, "w") as f:
         json.dump(linked_data, f, indent=4)
 
-    print(f"Updated linked data saved to {output_file}")
+def extract_text_and_link_to_diagrams(json_file, output_dir="static/verified_crops", database=DATABASE):
+    ocr = PaddleOCR(use_angle_cls=True, lang="latin")
+
+    with open(json_file, "r") as f:
+        question_diagram_links = json.load(f)
+
+    with sqlite3.connect(database) as conn:
+        cursor = conn.cursor()
+        for link in question_diagram_links:
+            quiz_path = link["question"]
+            diagram_path = link["diagram"]
+            pdf_filename = link["pdf_filename"]
+
+            if not os.path.exists(quiz_path):
+                print(f"Quiz image not found: {quiz_path}")
+                continue
+
+            results = ocr.ocr(quiz_path, cls=True)
+            extracted_text = " ".join([line[1][0] for line in results[0]]) if results else ""
+
+            cursor.execute('''
+            SELECT id, topic_tags, subject, exam_type FROM pdfs WHERE filename = ?
+            ''', (pdf_filename,))
+            pdf_data = cursor.fetchone()
+
+            if pdf_data:
+                pdf_id, topic, subject, exam_type = pdf_data
+                cursor.execute('''
+                INSERT INTO questions (pdf_id, question_text, diagram_path, topic, subject, exam_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''', (pdf_id, extracted_text, diagram_path, topic, subject, exam_type))
+        conn.commit()
 
 # Initialize database
 def init_db():
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
+        
+        # Create the PDFs table (adding topic_tags field)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS pdfs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
             exam_type TEXT NOT NULL,
             subject TEXT NOT NULL,
+            topic_tags TEXT,
             upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
+        
+        # Create the Questions table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pdf_id INTEGER,
+            question_text TEXT,
+            diagram_path TEXT,
+            topic TEXT,
+            subject TEXT,
+            exam_type TEXT,
+            FOREIGN KEY (pdf_id) REFERENCES pdfs (id)
+        )
+        ''')
+        
+        # Create the Topics table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_type TEXT,
+            subject TEXT,
+            topic_name TEXT
+        )
+        ''')
+        
         conn.commit()
 
 @app.route('/')
@@ -178,7 +229,6 @@ def upload_page():
     session.pop('uploaded_pdf', None)
     return render_template('index.html')  # Same upload UI as before
 
-# Route: Handle form submission
 @app.route('/success', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -190,7 +240,6 @@ def upload_file():
         return "No file selected", 400
 
     if file and allowed_file(file.filename):
-        # Secure the file name and save it
         filename = secure_filename(file.filename)
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
@@ -198,22 +247,44 @@ def upload_file():
         # Get form data
         exam_type = request.form['exam_type']
         subject = request.form['subject']
+        topic = request.form.get('topic', None)
 
         # Insert into database
         with sqlite3.connect(DATABASE) as conn:
             cursor = conn.cursor()
+
+            # Insert PDF metadata
             cursor.execute('''
-            INSERT INTO pdfs (filename, exam_type, subject)
-            VALUES (?, ?, ?)
-            ''', (filename, exam_type, subject))
+            INSERT INTO pdfs (filename, exam_type, subject, topic_tags)
+            VALUES (?, ?, ?, ?)
+            ''', (filename, exam_type, subject, topic))
+
+            # Ensure topic exists in the topics table
+            cursor.execute('''
+            SELECT id FROM topics WHERE exam_type = ? AND subject = ? AND topic_name = ?
+            ''', (exam_type, subject, topic))
+            topic_exists = cursor.fetchone()
+
+            if not topic_exists and topic:
+                cursor.execute('''
+                INSERT INTO topics (exam_type, subject, topic_name)
+                VALUES (?, ?, ?)
+                ''', (exam_type, subject, topic))
+
             conn.commit()
 
         session['uploaded_pdf'] = file_path
 
-        return render_template('success.html', filename=filename, exam_type=exam_type, subject=subject)
+        return render_template(
+            'success.html',
+            filename=filename,
+            exam_type=exam_type,
+            subject=subject,
+            topic=topic
+        )
     else:
         return "Invalid file type", 400
-
+    
 @app.route('/delete/<int:id>', methods=['POST'])
 def delete_row(id):
     try:
@@ -342,7 +413,8 @@ def annotate():
             return "No more images to annotate.", 200  # Return when no images are left
 
         # Extract the current image and its annotations
-        current_image_path = unverified_images[0]['path']
+        current_image = unverified_images[0]  # Get the first unverified image
+        current_image_path = current_image['path']
         current_annotations = [anno for anno in unverified_images if anno['path'] == current_image_path]
 
         # Debug: Print the current image and annotations
@@ -422,7 +494,18 @@ def annotate():
 
 @app.route('/annotation_complete', methods=['GET'])
 def annotation_complete():
+    # Path to the JSON file containing the links
+    json_file = "question_diagram_links.json"
+
+    # Call the function to extract text and link diagrams
+    try:
+        extract_text_and_link_to_diagrams(json_file)
+    except Exception as e:
+        print(f"Error during text extraction and linking: {e}")
+        return "An error occurred during text extraction and linking. Please check the logs.", 500
+
     return "Annotation process completed successfully!"
 
 if __name__ == "__main__":
+    init_db()
     app.run(debug=True)

@@ -89,9 +89,9 @@ def run_yolo_and_save_with_boxes(image_paths, model_path="best.pt", output_dir="
             })
 
             # Draw bounding boxes on the image
-            cv2.rectangle(original_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+            cv2.rectangle(original_image, (x_min, y_min), (x_max, y_max), (0, 255, 0), 12)
             cv2.putText(original_image, f"{class_name} {confidence:.2f}",
-                        (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                        (x_min, y_min - 10), cv2.FONT_HERSHEY_SIMPLEX, 2.5, (255, 0, 0), 10)
 
         # Save processed image with bounding boxes
         output_path = os.path.join(output_dir, os.path.basename(image_path))

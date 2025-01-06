@@ -15,7 +15,6 @@
             animation: spin 2s linear infinite;
             margin: 0 auto; /* Center spinner horizontally */
         }
-
         @keyframes spin {
             0% {
                 transform: rotate(0deg);
@@ -25,7 +24,6 @@
                 transform: rotate(360deg);
             }
         }
-
         .loading-overlay {
             position: fixed;
             top: 0;
@@ -45,7 +43,6 @@
     <div class="loading-overlay" id="loading">
         <div class="spinner"></div>
     </div>
-
     <div class="container">
         <div class="card">
             <h1>Upload Successful!</h1>
@@ -53,6 +50,8 @@
             <p>Subject: <strong>{{ subject }}</strong></p>
             <p>Exam Type: <strong>{{ exam_type }}</strong></p>
             <p>Topic: <strong>{{ topic }}</strong></p>
+            <p>Difficulty level: <strong>{{difficulty_level}}</strong></p>
+
             <form action="/process" method="post">
                 <button type="submit" class="btn btn-primary" onclick="showLoading();">Proceed to Process</button>
                 <a href="/view_data" class="btn">View All Uploaded Data</a>

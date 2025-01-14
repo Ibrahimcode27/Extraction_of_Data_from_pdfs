@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annotation Complete</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .button-primary {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .button-delete {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            cursor: pointer;
+            padding: 5px 10px;
+            font-size: 14px;
+        }
+
+        .button-delete:hover {
+            background-color: #d32f2f;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Annotation Process Completed</h1>
+
+    <h2>Extracted Questions and Related Data</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Page</th>
+                <th>Question</th>
+                <th>Options</th>
+                <th>Solution</th>
+                <th>Diagram</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in extracted_data %}
+            <tr>
+                <td>{{ item.page }}</td>
+                <td>{{ item.question_text }}</td>
+                <td>
+                    <ul>
+                        {% for option in item.options_text %}
+                        <li>{{ option }}</li>
+                        {% endfor %}
+                    </ul>
+                </td>
+                <td>{{ item.solution_text }}</td>
+                <td>
+                    {% if item.diagram_image_path %}
+                    <a href="{{ item.diagram_image_path }}" target="_blank">{{ item.diagram_image_path }}</a>
+                    {% else %}
+                    No Diagram
+                    {% endif %}
+                </td>
+                <td>
+                    <form action="/delete_annotation_row" method="POST" style="display:inline;">
+                        <input type="hidden" name="row_index" value="{{ loop.index0 }}">
+                        <button type="submit" class="button-delete">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <form action="/move_to_database" method="POST">
+        <input type="hidden" name="output_json" value="{{ output_json }}">
+        <button type="submit" class="button button-primary">Move to Database</button>
+    </form>
+</body>
+
+</html>

@@ -1,6 +1,5 @@
 import os
-import io
-from google.cloud import vision
+import google.generativeai as genai
 import json
 from ultralytics import YOLO
 from flask import Flask, render_template, request, redirect, url_for, session
@@ -8,12 +7,16 @@ from pdf2image import convert_from_path
 import cv2
 from werkzeug.utils import secure_filename
 import tempfile
+from PIL import Image
+import re
+import time
+import shutil
 import mysql.connector
 
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'  # Replace with a secure key
-
+app.config['GOOGLE_API_KEY'] = "AIzaSyAhUVXdf65Q0_S8BSY8x6CN8lnkFx0KH_g"
 # Directories
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -34,6 +37,33 @@ def allowed_file(filename):
 
 def normalize_path(path):
     return path.replace("\\", "/")
+
+def move_verified_diagrams():
+    src_dir = "static/verified_crops/Diagrams"
+    dest_dir = "static/permanent_diagrams"
+    os.makedirs(dest_dir, exist_ok=True)
+
+    for file in os.listdir(src_dir):
+        src_path = os.path.join(src_dir, file)
+        dest_path = os.path.join(dest_dir, file)
+        if os.path.isfile(src_path):
+            shutil.move(src_path, dest_path)
+            
+def update_diagram_paths_in_json(json_file):
+    permanent_dir = "static/permanent_diagrams"
+    
+    with open(json_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    for entry in data:
+        if entry.get("diagram_image_path"):
+            diagram_filename = os.path.basename(entry["diagram_image_path"])
+            entry["diagram_image_path"] = os.path.join(permanent_dir, diagram_filename)
+
+    # Save the updated JSON file
+    with open(json_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
 
 def convert_pdf_to_images(pdf_path, output_folder="static/temp_images"):
     """
@@ -127,6 +157,7 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
         linked_data = []
 
     new_links = []
+    used_diagrams = set()  # To ensure diagrams are linked to only one question
 
     for page_id, annotations in annotation_data.items():
         # Separate annotations by class
@@ -148,10 +179,14 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
             # Get the vertical center of the question
             question_center_y = (question['y_min'] + question['y_max']) / 2
 
-            # Find the closest diagram
+            # Find the closest diagram that is not already used
             linked_diagram = None
             min_distance = float('inf')
             for diagram in diagrams:
+                diagram_id = (diagram['path'], diagram['x_min'], diagram['y_min'])
+                if diagram_id in used_diagrams:  # Skip already used diagrams
+                    continue
+
                 if diagram['y_min'] >= question['y_min']:  # Diagram is below or overlaps with the question
                     distance = abs(diagram['y_min'] - question['y_max'])
                     if distance < min_distance:
@@ -160,13 +195,20 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
                             output_dir, "Diagrams",
                             f"{os.path.basename(diagram['path'])}_{diagram['x_min']}_{diagram['y_min']}.png"
                         ).replace("\\", "/")
+                        closest_diagram_id = diagram_id
+
+            # Mark the diagram as used if linked
+            if linked_diagram:
+                used_diagrams.add(closest_diagram_id)
 
             # Find the closest option (ensure option is not already linked and the question is above the option)
             linked_option = None
             min_distance = float('inf')
+            threshold = 50  # Allow small proximity overlap
+
             for option in options:
                 option_id = (option['path'], option['x_min'], option['y_min'])  # Use a unique identifier
-                if option['y_min'] > question['y_max'] and option_id not in used_options:  # Option is strictly below
+                if option['y_min'] >= question['y_max'] - threshold and option_id not in used_options:  # Relaxed condition
                     # Check if this question is the closest to the option
                     distance_to_question = abs(option['y_min'] - question['y_max'])
                     distance_to_any_other_question = float('inf')
@@ -185,6 +227,8 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
                             f"{os.path.basename(option['path'])}_{option['x_min']}_{option['y_min']}.png"
                         ).replace("\\", "/")
                         used_options.add(option_id)  # Mark this option as used
+
+            print(f"Final linked option for question {question['path']}: {linked_option}")
 
             # Find the closest solution (ensure solution is not already linked and the question is above the solution)
             linked_solution = None
@@ -238,125 +282,179 @@ def save_question_diagram_links(annotation_data, output_dir="static/verified_cro
 
     print(f"Updated linked data saved to {output_file}")
 
-# Function to extract text using Google Vision API
-def extract_text_google_vision(image_path):
+def clean_text(text):
     """
-    Extract text from an image using Google Cloud Vision API.
+    Cleans a block of text by removing unwanted phrases and formatting.
+    Args:
+        text (str): The text to clean.
+    Returns:
+        str: Cleaned text.
+    """
+    if not text:
+        return ""
+    
+    # Remove phrases like "Here's the extracted text suitable for database storage:"
+    cleaned_text = re.sub(r"Here's.*?:\n\n", "", text, flags=re.DOTALL)
+    # Remove code block delimiters and whitespace
+    cleaned_text = cleaned_text.replace("```", "").strip()
+    return cleaned_text
+
+def clean_options(options):
+    """
+    Cleans the options list to extract only numeric options.
+    Args:
+        options (list): List of options text.
+    Returns:
+        list: Cleaned options.
+    """
+    cleaned_options = []
+    for option in options:
+        # Skip unwanted lines
+        if "Here's" in option or "This can be" in option:
+            continue
+        # Extract options in format "1. Text" or "(1) Text"
+        match = re.match(r"(?:\d+\.|\(\d+\))\s*(.*)", option)
+        if match:
+            cleaned_options.append(match.group(1).strip())
+    return cleaned_options
+
+def clean_extracted_json(json_data):
+    """
+    Cleans the extracted JSON by removing unwanted text and formatting.
+    Args:
+        json_data (list): The extracted JSON data.
+    Returns:
+        list: Cleaned JSON data.
+    """
+    for entry in json_data:
+        # Clean question text
+        entry["question_text"] = clean_text(entry.get("question_text", ""))
+        
+        # Clean options text
+        entry["options_text"] = clean_options(entry.get("options_text", []))
+        
+        # Clean solution text
+        entry["solution_text"] = clean_text(entry.get("solution_text", ""))
+        
+        # Clean diagram text
+        entry["diagram_text"] = clean_text(entry.get("diagram_text", ""))
+    return json_data
+
+def parse_extracted_text(text):
+    """
+    Parse the extracted text to handle both plain text and JSON-like outputs.
+    Args:
+        text (str): Extracted text.
+    Returns:
+        str: Cleaned and parsed text.
+    """
+    try:
+        # Attempt to parse as JSON
+        parsed = json.loads(text)
+        return parsed.get("question", text)  # Default to original text if "question" key doesn't exist
+    except json.JSONDecodeError:
+        # Return plain text if it's not valid JSON
+        return text
+
+def extract_text_gemini(image_path):
+    """
+    Extract text from an image using Google's Generative AI.
     Args:
         image_path (str): Path to the image file.
     Returns:
-        str: Extracted text or an empty string if no text is detected.
+        str: Extracted text or an error message.
     """
     try:
-        # Initialize the Vision API client
-        client = vision.ImageAnnotatorClient()
+        # Initialize Gemini API
+        api_key = app.config['GOOGLE_API_KEY']
+        genai.configure(api_key=api_key)
 
-        # Load the image from file
-        with io.open(image_path, 'rb') as image_file:
-            content = image_file.read()
+        # Load the image
+        image = Image.open(image_path)
 
-        # Create an Image object from the image content
-        image = vision.Image(content=content)
+        # Use the model for text extraction
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content([
+            "Extract exact text from image to store in database.",
+            image
+        ])
+        response.resolve()  # Ensure the response is fully resolved
 
-        # Perform text detection on the image
-        response = client.document_text_detection(image=image)
-
-        # Handle potential errors
-        if response.error.message:
-            raise Exception(f"Google Vision API Error: {response.error.message}")
-
-        # Extract the detected text
-        return response.full_text_annotation.text if response.full_text_annotation else ""
-
+        # Extract and return the text
+        return response.text
     except Exception as e:
-        print(f"Error in text extraction: {e}")
-        return ""
-
-# Function to refine mathematical expressions
-def refine_math_symbols(text):
+        print(f"Error extracting text: {e}")
+        time.sleep(1)  # Add a delay before the next API call
+        return None
+    
+def extract_text_and_save_to_json(json_file, output_json="questions_with_details.json"):
     """
-    Attempt to parse mathematical expressions and normalize them using SymPy.
-    Args:
-        text (str): Text extracted from OCR.
-    Returns:
-        str: Refined and simplified text if mathematical content is detected, otherwise the original text.
-    """
-    try:
-        from sympy.parsing.latex import parse_latex
-        from sympy import simplify
-        math_expr = parse_latex(text)
-        simplified_expr = simplify(math_expr)
-        return str(simplified_expr)
-    except Exception as e:
-        print(f"Error refining math symbols: {e}")
-        return text
-
-# Main function to process data and save to JSON
-def extract_text_and_refine_equations(json_file, output_json="questions_with_details.json"):
-    """
-    Extract text from images using Google Vision API and refine equations.
+    Extract text from images using Gemini API and save it to a JSON file.
     Args:
         json_file (str): Path to input JSON file containing image links.
         output_json (str): Path to output JSON file for saving extracted data.
     """
-    # Load question-diagram links from the input JSON file
-    with open(json_file, "r") as f:
-        question_diagram_links = json.load(f)
+    try:
+        # Load the input JSON file
+        with open(json_file, "r") as f:
+            question_diagram_links = json.load(f)
+    except Exception as e:
+        print(f"Error reading JSON file {json_file}: {e}")
+        return
 
-    # Prepare a list to hold the extracted data
+    # List to store extracted data
     extracted_data = []
 
-    # Process each entry in the JSON
+    # Process each entry in the JSON file
     for entry in question_diagram_links:
-        page = entry["page"]
-        question_path = entry.get("question", None)
-        diagram_path = entry.get("diagram", None)
-        options_path = entry.get("options", None)
-        solution_path = entry.get("solution", None)
-        pdf_filename = entry.get("pdf_filename", "unknown_pdf")
+        try:
+            page = entry.get("page", "")
+            question_path = entry.get("question", None)
+            options_path = entry.get("options", None)
+            solution_path = entry.get("solution", None)
+            diagram_path = entry.get("diagram", None)
+            pdf_filename = entry.get("pdf_filename", "unknown_pdf")
 
-        # Perform OCR for each type of image if paths exist
-        question_text, options_text, solution_text, diagram_text = "", [], "", ""
+            # Extract and parse question text
+            question_text = extract_text_gemini(question_path)
+            question_text = parse_extracted_text(question_text) if question_text else ""
 
-        if question_path and os.path.exists(question_path):
-            raw_text = extract_text_google_vision(question_path)
-            print(f"raw Question: {raw_text}")
-            question_text = refine_math_symbols(raw_text)  # Refine math symbols in the question
+            # Extract and parse options text
+            options_text = extract_text_gemini(options_path)
+            options_text = parse_extracted_text(options_text).split("\n") if options_text else []
 
-        if options_path and os.path.exists(options_path):
-            raw_text = extract_text_google_vision(options_path)
-            print(f"Raw Option: {raw_text}")
-            options_text = [refine_math_symbols(line) for line in raw_text.split('\n')]
+            # Extract and parse solution text
+            solution_text = extract_text_gemini(solution_path)
+            solution_text = parse_extracted_text(solution_text) if solution_text else ""
 
-        if solution_path and os.path.exists(solution_path):
-            raw_text = extract_text_google_vision(solution_path)
-            print(f"Solution path: {raw_text}")
-            solution_text = refine_math_symbols(raw_text)  # Refine math symbols in the solution
+            # Add extracted data to the list
+            extracted_data.append({
+                "page": page,
+                "pdf_filename": pdf_filename,
+                "question_text": question_text,
+                "options_text": options_text,
+                "solution_text": solution_text,
+                "quiz_image_path": question_path,
+                "options_image_path": options_path,
+                "solution_image_path": solution_path,
+                "diagram_image_path": diagram_path
+            })
 
-        if diagram_path and os.path.exists(diagram_path):
-            diagram_text = extract_text_google_vision(diagram_path)
-            print(f"diagram text: {diagram_text}")
-            # Diagrams might not need refinement
+        except Exception as e:
+            print(f"Error processing entry {entry}: {e}")
 
-        # Collect extracted data
-        extracted_entry = {
-            "page": page,
-            "pdf_filename": pdf_filename,
-            "question_text": question_text,
-            "options_text": options_text,
-            "solution_text": solution_text,
-            "diagram_text": diagram_text,
-            "quiz_image_path": question_path,
-            "options_image_path": options_path,
-            "solution_image_path": solution_path,
-            "diagram_image_path": diagram_path,
-        }
-        extracted_data.append(extracted_entry)
+    try:
+        # Clean the extracted data
+        cleaned_data = clean_extracted_json(extracted_data)
 
-    # Save the extracted data to a JSON file
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(extracted_data, f, ensure_ascii=False, indent=4)
-    print(f"Extracted data saved to {output_json}")
+        # Save the cleaned data to the output JSON file
+        with open(output_json, "w", encoding="utf-8") as f:
+            json.dump(cleaned_data, f, ensure_ascii=False, indent=4)
+
+        print(f"Cleaned and extracted data saved to {output_json}")
+    except Exception as e:
+        print(f"Error cleaning or saving data: {e}")
+
 
 def init_db():
     conn = mysql.connector.connect(**DATABASE_CONFIG)  # Ensure conn is defined even if connection fails
@@ -440,6 +538,7 @@ def init_db():
             cursor.close()
             conn.close()
 
+
 #first route.
 @app.route('/')
 def upload_page():
@@ -447,7 +546,6 @@ def upload_page():
     session.clear()
     session.pop('uploaded_pdf', None)
     return render_template('index.html')  # Same upload UI as before
-
 
 #second route.
 @app.route('/success', methods=['POST'])
@@ -471,27 +569,48 @@ def upload_file():
         topic = request.form.get('topic', None)
         difficulty_level = request.form.get('difficulty_level')  # New field
 
+        # Clear JSON file
+        json_file = "question_diagram_links.json"
         try:
-            # Connect to MySQL database
+            if os.path.exists(json_file):
+                with open(json_file, "w", encoding="utf-8") as f:
+                    json.dump([], f, ensure_ascii=False, indent=4)
+                print(f"{json_file} cleared successfully.")
+        except Exception as e:
+            print(f"Error clearing JSON file: {e}")
+
+        # Clear verified_crops directory
+        verified_crops_dir = "./static/verified_crops"
+        try:
+            if os.path.exists(verified_crops_dir):
+                for root, dirs, files in os.walk(verified_crops_dir):
+                    for file in files:
+                        os.remove(os.path.join(root, file))
+                print(f"Cleared all images in {verified_crops_dir}.")
+        except Exception as e:
+            print(f"Error clearing verified_crops directory: {e}")
+
+        # Save PDF metadata in the database
+        try:
             conn = mysql.connector.connect(**DATABASE_CONFIG)
             cursor = conn.cursor()
 
             # Insert PDF metadata into `pdfs` table
             cursor.execute('''
-            INSERT INTO pdfs (filename, exam_type, subject, topic_tags, difficulty_level)
-            VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO pdfs (filename, exam_type, subject, topic_tags, difficulty_level)
+                VALUES (%s, %s, %s, %s, %s)
             ''', (filename, exam_type, subject, topic, difficulty_level))
 
             # Ensure topic exists in the `topics` table
             cursor.execute('''
-            SELECT id FROM topics WHERE exam_type = %s AND subject = %s AND topic_name = %s
+                SELECT id FROM topics WHERE exam_type = %s AND subject = %s AND topic_name = %s
             ''', (exam_type, subject, topic))
             topic_exists = cursor.fetchone()
 
             if not topic_exists and topic:
                 cursor.execute('''
-                INSERT INTO topics (exam_type, subject, topic_name)
-                VALUES (%s, %s, %s)
+                    INSERT INTO topics (exam_type, subject, topic_name)
+                    VALUES (%s, %s, %s)
                 ''', (exam_type, subject, topic))
 
             # Commit the transaction
@@ -519,7 +638,6 @@ def upload_file():
         )
     else:
         return "Invalid file type", 400
-
 
 @app.route('/delete/<int:id>', methods=['POST'])
 def delete_row(id):
@@ -564,7 +682,6 @@ def view_data():
         if conn.is_connected():
             cursor.close()
             conn.close()
-
 
 #third route.
 @app.route('/process', methods=['POST'])
@@ -667,11 +784,15 @@ def verify_crops():
 
         # Save links only for verified predictions
         save_question_diagram_links(verified_predictions)
-
         # Update session with unverified images
         session['unverified_images'] = [
             prediction for page_id, preds in predictions.items() for prediction in preds if prediction not in verified_predictions[page_id]
         ]
+        # Check if there are any unverified images left
+        if not session['unverified_images']:
+            # Redirect to /annotation_complete if all annotations are submitted
+            return redirect(url_for('annotation_complete'))
+        # Otherwise, redirect to the annotation page
         return redirect(url_for('annotate'))
 
 @app.route('/annotate', methods=['GET', 'POST'])
@@ -689,7 +810,6 @@ def annotate():
 
         # Debug: Print the current image and annotations
         print(f"Annotating image: {current_image_path}")
-        print(f"Annotations: {current_annotations}")
 
         # Save current annotations to the session for reference
         session['current_annotations'] = current_annotations
@@ -733,6 +853,7 @@ def annotate():
                     'diagram': 'Diagrams',
                     'diagrams': 'Diagrams',
                 }
+                
                 # Normalize class name using the mapping
                 class_name = valid_class_mapping.get(annotation['class_name'].lower(), None)
                 # Debugging: Print the normalized class name
@@ -779,8 +900,8 @@ def annotate():
 
             # Process only the new manual annotations for the current image
             page_predictions = {image_path: new_annotations}
+            print(page_predictions)
             save_question_diagram_links(page_predictions)
-
             # Debugging: Print the page predictions sent to the clustering function
             print(f"Page predictions sent for clustering: {page_predictions}")
 
@@ -797,20 +918,200 @@ def annotate():
             print(f"Unexpected error: {e}")
             return f"An error occurred: {str(e)}", 500
 
-#last route. (in process)
-@app.route('/annotation_complete', methods=['GET'])
+
+#Route - Changing JSON file.
+@app.route('/annotation_complete', methods=['GET', 'POST'])
 def annotation_complete():
-    # Path to the JSON file containing the links
-    json_file = "question_diagram_links.json"
+    json_file = "questions_with_details.json"  # Path to the output JSON file
+    input_file = "question_diagram_links.json"  # Path to the input JSON file
 
-    # Call the function to extract text and link diagrams
     try:
-        extract_text_and_refine_equations(json_file)
-    except Exception as e:
-        print(f"Error during text extraction and linking: {e}")
-        return "An error occurred during text extraction and linking. Please check the logs.", 500
+        # Call the extract function to generate the JSON file
+        move_verified_diagrams()
+        extract_text_and_save_to_json(input_file, json_file)
+        update_diagram_paths_in_json(json_file)
+        # Load the newly generated JSON file
+        with open(json_file, "r", encoding="utf-8") as f:
+            extracted_data = json.load(f)
 
-    return "Annotation process completed successfully!"
+        # Render the page with the extracted data
+        return render_template(
+            "annotation_complete.html",
+            extracted_data=extracted_data,
+            output_json=json_file
+        )
+
+    except Exception as e:
+        print(f"Error during annotation completion: {e}")
+        return "An error occurred during annotation completion. Please check the logs.", 500
+
+#Delete for final verification
+@app.route('/delete_annotation_row', methods=['POST'])
+def delete_annotation_row():
+    """
+    Deletes a row from the JSON file based on the provided index.
+    """
+    row_index = request.form.get('row_index')  # Extract the row index from the form
+    json_file = "questions_with_details.json"
+
+    if not row_index:
+        print("Row index not provided in the form.")
+        return "Row index not provided. Please try again.", 400
+
+    try:
+        # Convert the row index to an integer
+        row_index = int(row_index)
+
+        # Check if the JSON file exists
+        if not os.path.exists(json_file):
+            print("JSON file not found.")
+            return "JSON file not found. Please reload the page.", 400
+
+        # Load the existing JSON data
+        with open(json_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Validate the row index
+        if 0 <= row_index < len(data):
+            # Remove the specific row
+            del data[row_index]
+
+            # Save the updated JSON data back to the file
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+
+            print(f"Deleted row {row_index} successfully.")
+        else:
+            print(f"Invalid row index: {row_index}.")
+            return f"Invalid row index: {row_index}", 400
+
+    except ValueError as e:
+        print(f"Invalid row index value: {e}.")
+        return "Invalid row index format. Please provide a valid number.", 400
+    except Exception as e:
+        print(f"Unexpected error: {e}.")
+        return "An error occurred while deleting the row. Please try again.", 500
+
+    # Redirect back to the annotation_complete route to refresh the page
+    return redirect(url_for('annotation_complete'))
+
+#Route to move to database. 
+@app.route('/move_to_database', methods=['POST'])
+def move_to_database():
+    output_json = request.form.get('output_json')
+    conn = None
+
+    if not output_json or not os.path.exists(output_json):
+        return "JSON file not found. Please try again.", 400
+
+    try:
+        # Load the verified data from the JSON file
+        with open(output_json, "r", encoding="utf-8") as f:
+            verified_data = json.load(f)
+
+        # Connect to the database
+        conn = mysql.connector.connect(**DATABASE_CONFIG)
+        cursor = conn.cursor()
+
+        for entry in verified_data:
+            pdf_filename = entry["pdf_filename"]
+            question_text = entry["question_text"]
+            options_text = entry.get("options_text", [])
+            solution_text = entry.get("solution_text", "")
+            diagram_path = entry.get("diagram_image_path", "")
+
+            # Query PDF metadata
+            cursor.execute('''
+                SELECT id, exam_type, subject, topic_tags, difficulty_level 
+                FROM pdfs 
+                WHERE filename = %s
+            ''', (pdf_filename,))
+            pdf_result = cursor.fetchone()
+
+            if not pdf_result:
+                print(f"PDF metadata not found for filename: {pdf_filename}. Skipping entry.")
+                continue  # Skip this entry if no metadata is found
+
+            pdf_id, exam_type, subject, topic_tags, difficulty_level = pdf_result
+
+            # Check if the question_text already exists in the database
+            cursor.execute('''
+                SELECT id FROM questions WHERE question_text = %s
+            ''', (question_text,))
+            existing_question = cursor.fetchone()
+
+            # Clear unread results if any
+            if existing_question:
+                cursor.fetchall()  # Discard any additional unread rows
+                print(f"Duplicate question found: {question_text}. Skipping insertion.")
+                continue  # Skip this question if it's a duplicate
+
+            # Insert question data
+            cursor.execute('''
+                INSERT INTO questions (pdf_id, question_text, topic, subject, exam_type)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (pdf_id, question_text, topic_tags or "Unknown", subject or "Unknown", exam_type or "Unknown"))
+            question_id = cursor.lastrowid
+
+            # Insert options
+            for option in options_text:
+                cursor.execute('''
+                    INSERT INTO options (question_id, option_text)
+                    VALUES (%s, %s)
+                ''', (question_id, option))
+
+            # Insert solution (if available)
+            if solution_text:
+                cursor.execute('''
+                    INSERT INTO solutions (question_id, solution_text)
+                    VALUES (%s, %s)
+                ''', (question_id, solution_text))
+
+            # Handle diagram path (if available)
+            if diagram_path:
+                permanent_path = os.path.join("static/permanent_diagrams", os.path.basename(diagram_path))
+                try:
+                    # Check if diagram file exists
+                    if os.path.exists(diagram_path):
+                        print(f"Diagram path from JSON: {diagram_path}")
+                        os.makedirs("static/permanent_diagrams", exist_ok=True)
+                        
+                        # Copy diagram to permanent directory only if not already present
+                        if not os.path.exists(permanent_path):
+                            shutil.copy(diagram_path, permanent_path)
+                            print(f"Diagram copied to: {permanent_path}")
+
+                        # Update the diagram path in the database
+                        cursor.execute('''
+                            UPDATE questions
+                            SET diagram_path = %s
+                            WHERE id = %s
+                        ''', (permanent_path, question_id))
+                        print(f"Diagram path updated in the database for question ID: {question_id}")
+                    else:
+                        print(f"Diagram file not found at path: {diagram_path}. Skipping.")
+                except Exception as e:
+                    print(f"Error handling diagram path: {e}")
+
+        # Commit the transaction
+        conn.commit()
+        print("Data moved to the database successfully, avoiding duplicates.")
+
+    except mysql.connector.Error as err:
+        print(f"MySQL Error: {err}")
+        return "A database error occurred. Please check the logs.", 500
+    except Exception as e:
+        print(f"Error moving data to the database: {e}")
+        return "An error occurred while moving data to the database. Please check the logs.", 500
+    finally:
+        if conn and conn.is_connected():
+            try:
+                cursor.close()
+                conn.close()
+            except mysql.connector.Error as err:
+                print(f"Error closing connection: {err}")
+
+    return redirect(url_for('view_data'))
 
 #main app.py running.
 if __name__ == "__main__":

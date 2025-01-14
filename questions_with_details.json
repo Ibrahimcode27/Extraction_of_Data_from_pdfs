@@ -1,0 +1,60 @@
+[
+    {
+        "page": "static/temp_images\\page_1.png",
+        "pdf_filename": "a.pdf",
+        "question_text": "text\nQuestion 1. The number of ways in which 21 identical apples can be distributed among three children such that each child gets at least 2 apples, is",
+        "options_text": [
+            "406",
+            "130",
+            "142",
+            "136"
+        ],
+        "solution_text": "",
+        "quiz_image_path": "static/verified_crops/Questions/page_1.png_192_811.png",
+        "options_image_path": "static/verified_crops/Options/page_1.png_216_1045.png",
+        "solution_image_path": null,
+        "diagram_image_path": null,
+        "diagram_text": ""
+    },
+    {
+        "page": "static/temp_images\\page_2.png",
+        "pdf_filename": "a.pdf",
+        "question_text": "Question 42.A block of mass 5 kg is placed on a rough inclined surface as shown in the figure. If F₁ is the force required to just move the block up the inclined plane and F₂ is the force required to just prevent the block from sliding down, then the value of |F₁ - F₂| is:\n[Use g = 10 m/s²]",
+        "options_text": [
+            "25√3N",
+            "5√3N",
+            "5√3/2 N",
+            "10 N"
+        ],
+        "solution_text": "",
+        "quiz_image_path": "static/verified_crops/Questions/page_2.png_216_216.png",
+        "options_image_path": "static/verified_crops/Options/page_2.png_204_1141.png",
+        "solution_image_path": null,
+        "diagram_image_path": "static/permanent_diagrams\\page_2.png_901_685.png",
+        "diagram_text": ""
+    },
+    {
+        "page": "static/temp_images\\page_2.png",
+        "pdf_filename": "a.pdf",
+        "question_text": "Question 43. By what percentage will the illumination of the lamp decrease if the current drops by 20%?",
+        "options_text": [],
+        "solution_text": "",
+        "quiz_image_path": "static/verified_crops/Questions/page_2.png_216_1712.png",
+        "options_image_path": "static/verified_crops/Options/page_2.png_192_1922.png",
+        "solution_image_path": null,
+        "diagram_image_path": null,
+        "diagram_text": ""
+    },
+    {
+        "page": "static/temp_images\\page_3.png",
+        "pdf_filename": "a.pdf",
+        "question_text": "Question 30.Let A = {1, 2, 3, ..., 100}. Let R be a relation on A defined by (x, y) ∈ R if and only if 2x = 3y. Let R₁ be a symmetric relation on A such that R ⊂ R₁ and the number of elements in R₁ is n. Then, the minimum value of n is _______.",
+        "options_text": [],
+        "solution_text": "",
+        "quiz_image_path": "static/verified_crops/Questions/page_3.png_222_1117.png",
+        "options_image_path": null,
+        "solution_image_path": null,
+        "diagram_image_path": null,
+        "diagram_text": ""
+    }
+]

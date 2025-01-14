@@ -16,7 +16,7 @@ import mysql.connector
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'  # Replace with a secure key
-app.config['GOOGLE_API_KEY'] = "AIzaSyAhUVXdf65Q0_S8BSY8x6CN8lnkFx0KH_g"
+app.config['GOOGLE_API_KEY'] = ""
 # Directories
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER

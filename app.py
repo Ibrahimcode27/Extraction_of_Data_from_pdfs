@@ -23,10 +23,10 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
 
 DATABASE_CONFIG = {
-    'host': 'localhost',          # Your MySQL host
-    'user': 'roots',               # Your MySQL username
-    'password': '1234',  # Your MySQL password
-    'database': 'extractor'   # Your database name
+    'host': 'auth-db982.hstgr.io',          # Your MySQL host
+    'user': 'u273147311_admin',               # Your MySQL username
+    'password': 'Code4bharat@123',  # Your MySQL password
+    'database': 'u273147311_examportal'   # Your database name
 }
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

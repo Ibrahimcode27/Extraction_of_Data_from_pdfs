@@ -11,16 +11,25 @@ from PIL import Image
 import re
 import time
 import shutil
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 import mysql.connector
 
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'  # Replace with a secure key
-app.config['GOOGLE_API_KEY'] = ""
+app.config['GOOGLE_API_KEY'] = "AIzaSyAhUVXdf65Q0_S8BSY8x6CN8lnkFx0KH_g"
 # Directories
 UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['ALLOWED_EXTENSIONS'] = {'pdf'}
+
+cloudinary.config(
+    cloud_name="dpdqxdlz5",  # Replace with your Cloudinary cloud name
+    api_key="956864746811318",       # Replace with your Cloudinary API key
+    api_secret="U8vyHhuTQ52KH2-xUsQQJWZdH0I"  # Replace with your Cloudinary API secret
+)
 
 DATABASE_CONFIG = {
     'host': 'auth-db982.hstgr.io',          # Your MySQL host
@@ -473,17 +482,39 @@ def init_db():
             upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
+
+        # Create the Topics table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS topics (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            exam_type VARCHAR(50),
+            subject VARCHAR(255),
+            topic_name VARCHAR(255)
+        )
+        ''')
+
+        # Create the Diagrams table
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS diagrams (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            diagram_path VARCHAR(255) NOT NULL,
+            upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+
         # Create the Questions table
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS questions (
             id INT AUTO_INCREMENT PRIMARY KEY,
             pdf_id INT,
             question_text TEXT,
-            diagram_path VARCHAR(255),
-            topic VARCHAR(255),
+            diagram_id INT,
+            topic_id INT,
             subject VARCHAR(255),
             exam_type VARCHAR(50),
-            FOREIGN KEY (pdf_id) REFERENCES pdfs (id) ON DELETE CASCADE
+            FOREIGN KEY (pdf_id) REFERENCES pdfs (id) ON DELETE CASCADE,
+            FOREIGN KEY (diagram_id) REFERENCES diagrams (id) ON DELETE SET NULL,
+            FOREIGN KEY (topic_id) REFERENCES topics (id) ON DELETE SET NULL
         )
         ''')
 
@@ -504,26 +535,6 @@ def init_db():
             question_id INT NOT NULL,
             solution_text TEXT NOT NULL,
             FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
-        )
-        ''')
-
-        # Create the Diagrams table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS diagrams (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            question_id INT NOT NULL,
-            diagram_path VARCHAR(255) NOT NULL,
-            FOREIGN KEY (question_id) REFERENCES questions (id) ON DELETE CASCADE
-        )
-        ''')
-
-        # Create the Topics table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS topics (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            exam_type VARCHAR(50),
-            subject VARCHAR(255),
-            topic_name VARCHAR(255)
         )
         ''')
 
@@ -1019,12 +1030,13 @@ def move_to_database():
             options_text = entry.get("options_text", [])
             solution_text = entry.get("solution_text", "")
             diagram_path = entry.get("diagram_image_path", "")
+            topic_name = entry.get("topic", None)
+            exam_type = entry.get("exam_type", None)
+            subject = entry.get("subject", None)
 
             # Query PDF metadata
             cursor.execute('''
-                SELECT id, exam_type, subject, topic_tags, difficulty_level 
-                FROM pdfs 
-                WHERE filename = %s
+                SELECT id FROM pdfs WHERE filename = %s
             ''', (pdf_filename,))
             pdf_result = cursor.fetchone()
 
@@ -1032,7 +1044,41 @@ def move_to_database():
                 print(f"PDF metadata not found for filename: {pdf_filename}. Skipping entry.")
                 continue  # Skip this entry if no metadata is found
 
-            pdf_id, exam_type, subject, topic_tags, difficulty_level = pdf_result
+            pdf_id = pdf_result[0]
+
+            # Ensure topic exists and get its ID
+            topic_id = None
+            if topic_name:
+                cursor.execute('''
+                    SELECT id FROM topics WHERE exam_type = %s AND subject = %s AND topic_name = %s
+                ''', (exam_type, subject, topic_name))
+                topic_result = cursor.fetchone()
+
+                if not topic_result:
+                    cursor.execute('''
+                        INSERT INTO topics (exam_type, subject, topic_name)
+                        VALUES (%s, %s, %s)
+                    ''', (exam_type, subject, topic_name))
+                    topic_id = cursor.lastrowid
+                else:
+                    topic_id = topic_result[0]
+
+            # Upload diagram to Cloudinary and insert into diagrams table
+            diagram_id = None
+            if diagram_path:
+                try:
+                    upload_result = cloudinary.uploader.upload(diagram_path, folder="diagrams")
+                    secure_url = upload_result.get("secure_url")
+
+                    if secure_url:
+                        cursor.execute('''
+                            INSERT INTO diagrams (diagram_path)
+                            VALUES (%s)
+                        ''', (secure_url,))
+                        diagram_id = cursor.lastrowid
+                        print(f"Diagram uploaded and stored with ID: {diagram_id}")
+                except Exception as e:
+                    print(f"Error uploading diagram to Cloudinary: {e}")
 
             # Check if the question_text already exists in the database
             cursor.execute('''
@@ -1040,17 +1086,15 @@ def move_to_database():
             ''', (question_text,))
             existing_question = cursor.fetchone()
 
-            # Clear unread results if any
             if existing_question:
-                cursor.fetchall()  # Discard any additional unread rows
                 print(f"Duplicate question found: {question_text}. Skipping insertion.")
                 continue  # Skip this question if it's a duplicate
 
             # Insert question data
             cursor.execute('''
-                INSERT INTO questions (pdf_id, question_text, topic, subject, exam_type)
-                VALUES (%s, %s, %s, %s, %s)
-            ''', (pdf_id, question_text, topic_tags or "Unknown", subject or "Unknown", exam_type or "Unknown"))
+                INSERT INTO questions (pdf_id, question_text, diagram_id, topic_id, subject, exam_type)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (pdf_id, question_text, diagram_id, topic_id, subject or "Unknown", exam_type or "Unknown"))
             question_id = cursor.lastrowid
 
             # Insert options
@@ -1066,32 +1110,6 @@ def move_to_database():
                     INSERT INTO solutions (question_id, solution_text)
                     VALUES (%s, %s)
                 ''', (question_id, solution_text))
-
-            # Handle diagram path (if available)
-            if diagram_path:
-                permanent_path = os.path.join("static/permanent_diagrams", os.path.basename(diagram_path))
-                try:
-                    # Check if diagram file exists
-                    if os.path.exists(diagram_path):
-                        print(f"Diagram path from JSON: {diagram_path}")
-                        os.makedirs("static/permanent_diagrams", exist_ok=True)
-                        
-                        # Copy diagram to permanent directory only if not already present
-                        if not os.path.exists(permanent_path):
-                            shutil.copy(diagram_path, permanent_path)
-                            print(f"Diagram copied to: {permanent_path}")
-
-                        # Update the diagram path in the database
-                        cursor.execute('''
-                            UPDATE questions
-                            SET diagram_path = %s
-                            WHERE id = %s
-                        ''', (permanent_path, question_id))
-                        print(f"Diagram path updated in the database for question ID: {question_id}")
-                    else:
-                        print(f"Diagram file not found at path: {diagram_path}. Skipping.")
-                except Exception as e:
-                    print(f"Error handling diagram path: {e}")
 
         # Commit the transaction
         conn.commit()
@@ -1112,6 +1130,7 @@ def move_to_database():
                 print(f"Error closing connection: {err}")
 
     return redirect(url_for('view_data'))
+
 
 #main app.py running.
 if __name__ == "__main__":

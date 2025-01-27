@@ -1,0 +1,38 @@
+[
+    {
+        "page": "static/temp_images\\page_1.png",
+        "pdf_filename": "dorabot.io_images-to-pdf_1737645074.pdf",
+        "question_text": "Ques 2. Shortest wavelength in Lyman series has wavelength of 915\nÅ. Longest wavelength of Balmer series has a value of ?",
+        "options_text": [],
+        "quiz_image_path": "static/verified_crops/Questions/page_1.png_472_246.png",
+        "options_image_path": null,
+        "solution_image_path": null,
+        "diagram_image_path": null,
+        "solution_text": "",
+        "diagram_text": ""
+    },
+    {
+        "page": "static/temp_images\\page_2.png",
+        "pdf_filename": "dorabot.io_images-to-pdf_1737645074.pdf",
+        "question_text": "Ques 6. In thermodynamics adiabatic process, pressure is directly proportional to cube of absolute temperature. Find Cp/Cv for the gas",
+        "options_text": [],
+        "quiz_image_path": "static/verified_crops/Questions/page_2.png_476_382.png",
+        "options_image_path": null,
+        "solution_image_path": null,
+        "diagram_image_path": null,
+        "solution_text": "",
+        "diagram_text": ""
+    },
+    {
+        "page": "static/temp_images\\page_3.png",
+        "pdf_filename": "dorabot.io_images-to-pdf_1737645074.pdf",
+        "question_text": "Ques 11. If S = {2, 4, 8, 16, ..., 512}. If S is broken in 3 equal subsets A, B and C such that A∩B = B∩C = C∩A = φ and A∪B∪C = S then maximum number of ways to break is",
+        "options_text": [],
+        "quiz_image_path": "static/verified_crops/Questions/page_3.png_480_187.png",
+        "options_image_path": null,
+        "solution_image_path": null,
+        "diagram_image_path": null,
+        "solution_text": "",
+        "diagram_text": ""
+    }
+]

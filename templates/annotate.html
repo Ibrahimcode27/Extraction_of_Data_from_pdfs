@@ -55,6 +55,11 @@
             color: white;
         }
 
+        .button-skip {
+            background-color: #FFA500;
+            color: white;
+        }
+
         .loader {
             width: 32px;
             height: 90px;
@@ -150,6 +155,12 @@
             background-color: rgba(255, 255, 255, 0.8);
             z-index: 999;
         }
+
+        #feedback {
+            margin-top: 10px;
+            color: #4CAF50;
+            font-size: 14px;
+        }
     </style>
 </head>
 
@@ -160,26 +171,30 @@
         <canvas id="canvas"></canvas>
     </div>
     <div id="class-selector">
-        <select id="class-dropdown">
+        <select id="class-dropdown" aria-label="Class Selector">
             <option value="">Select Class</option>
             <option value="question">Questions</option>
             <option value="option">Options</option>
             <option value="solution">Solutions</option>
             <option value="diagram">Diagrams</option>
         </select>
-        <button class="button button-primary" onclick="saveAnnotation()">Save</button>
-        <button class="button button-danger" onclick="discardAnnotation()">Discard</button>
+        <button class="button button-primary" onclick="saveAnnotation()" aria-label="Save Annotation">Save</button>
+        <button class="button button-danger" onclick="discardAnnotation()"
+            aria-label="Discard Annotation">Discard</button>
     </div>
+
+    <!-- Feedback Display -->
+    <div id="feedback"></div>
 
     <!-- Loader Wrapper -->
     <div id="loader-wrapper">
         <div class="loader"></div>
     </div>
 
-    <form id="annotationForm" action="/annotate" method="POST">
-        <input type="hidden" name="image_path" value="{{ image_path }}">
+    <form id="annotationForm" action="{{ url_for('annotate.annotate') }}" method="POST">        <input type="hidden" name="image_path" value="{{ image_path }}">
         <input type="hidden" id="annotations" name="annotations">
         <button class="button button-secondary" type="button" onclick="submitAnnotations()">Submit</button>
+        <button class="button button-skip" type="button" onclick="skipAnnotation()">Skip</button>
     </form>
 
     <script>
@@ -403,7 +418,20 @@
             loaderWrapper.style.display = 'block';
             document.getElementById('annotationForm').submit();
         }
+        
+        function skipAnnotation() {
+            annotationsInput.value = JSON.stringify([]); // Set annotations to an empty JSON array
+            loaderWrapper.style.display = 'block'; // Show the loader
+            document.getElementById('annotationForm').submit(); // Submit the form
+        }
+
+        // Skip the current annotation
+        function skipAnnotation() {
+            loaderWrapper.style.display = 'block';
+            document.getElementById('annotationForm').submit(); // Submit the form without annotations
+        }
+
     </script>
-    </body>
-    
-    </html>
+</body>
+
+</html>

@@ -1,91 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload PDF</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <script>
-        // Predefined topics for each subject
-        const topicsBySubject = {
-            "Physics": ["Mechanics", "Thermodynamics", "Electrodynamics", "Optics", "Quantum Physics"],
-            "Chemistry": ["Organic Chemistry", "Inorganic Chemistry", "Physical Chemistry", "Biochemistry"],
-            "Mathematics": ["Algebra", "Calculus", "Geometry", "Trigonometry", "Statistics"],
-            "Biology": ["Cell Biology", "Genetics", "Ecology", "Human Anatomy", "Plant Physiology"],
-            "Other": ["General Topics"]
-        };
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload PDF</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script>
+        // Topics extracted from the provided JSON
+        const topicsBySubject = {
+            "Physics": [
+                "Unit I: Physics and Measurement",
+                "Unit II: Kinematics",
+                "Unit III: Laws of Motion",
+                "Unit IV: Work, Energy and Power",
+                "Unit V: Rotational Motion",
+                "Unit VI: Gravitation",
+                "Unit VII: Properties of Solids and Liquids",
+                "Unit VIII: Thermodynamics",
+                "Unit IX: Kinetic Theory of Gases",
+                "Unit X: Oscillations and Waves",
+                "Unit XI: Electrostatics",
+                "Unit XII: Current Electricity",
+                "Unit XIII: Magnetic Effects of Current and Magnetism",
+                "Unit XIV: Electromagnetic Induction And Alternating Currents",
+                "Unit XV: Electromagnetic Waves",
+                "Unit XVI: Optics",
+                "Unit XVII: Dual Nature of Matter and Radiation",
+                "Unit XVIII: Atoms and Nuclei",
+                "Unit XIX: Electronic Devices"
+            ],
+            "Chemistry": [
+                "Unit I: Some Basic Concepts of Chemistry",
+                "Unit II: Atomic Structure",
+                "Unit III: Chemical Bonding and Molecular Structure",
+                "Unit IV: Chemical Thermodynamics",
+                "Unit V: Solutions",
+                "Unit VI: Equilibrium",
+                "Unit VII: Redox Reactions and Electrochemistry",
+                "Unit VIII: Chemical Kinetics",
+                "Unit IX: Classification of Elements and Periodicity",
+                "Unit X: P-Block Elements",
+                "Unit XI: d - and f- BLOCK ELEMENTS",
+                "Unit XII: CO-ORDINATION COMPOUNDS",
+                "Unit XIII: Purification and Characterisation of Organic Compounds",
+                "Unit XIV: Some Basic Principles of Organic Chemistry",
+                "Unit XV: Hydrocarbons",
+                "Unit XVI: Organic Compounds Containing Halogen",
+                "Unit XVII: Organic Compound Containing Oxygen",
+                "Unit XVIII: Organic Compounds Containing Nitrogen",
+                "Unit XIX: Biomolecules",
+                "Unit XX: Principles Related to Practical Chemistry"
+            ],
+            "Biology": [
+                "Unit I: Diversity in Living World",
+                "Unit II: Structural Organisation in Animals and Plants",
+                "Unit III: Cell Structure and Function",
+                "Unit IV: Plant Physiology",
+                "Unit V: Human Physiology",
+                "Unit VI: Reproduction",
+                "Unit VII: Genetics and Evolution",
+                "Unit VIII: Biology and Human Welfare",
+                "Unit IX: Biotechnology and Its Applications",
+                "Unit X: Ecology and Environment"
+            ]
+        };
 
-        // Populate topics based on the selected subject
-        function populateTopics() {
-            const subjectSelect = document.getElementById('subject');
-            const topicSelect = document.getElementById('topic');
+        // Populate topics based on the selected subject
+        function populateTopics() {
+            const subjectSelect = document.getElementById('subject');
+            const topicSelect = document.getElementById('topic');
 
-            // Clear existing options
-            topicSelect.innerHTML = '<option value="">Select Topic</option>';
+            // Clear existing options
+            topicSelect.innerHTML = '<option value="">Select Topic</option>';
 
-            // Get the selected subject
-            const selectedSubject = subjectSelect.value;
+            // Get the selected subject
+            const selectedSubject = subjectSelect.value;
 
-            // Populate the topics dropdown
-            if (topicsBySubject[selectedSubject]) {
-                topicsBySubject[selectedSubject].forEach(topic => {
-                    const option = document.createElement('option');
-                    option.value = topic;
-                    option.textContent = topic;
-                    topicSelect.appendChild(option);
-                });
-            }
-        }
+            // Populate the topics dropdown
+            if (topicsBySubject[selectedSubject]) {
+                topicsBySubject[selectedSubject].forEach(topic => {
+                    const option = document.createElement('option');
+                    option.value = topic;
+                    option.textContent = topic;
+                    topicSelect.appendChild(option);
+                });
+            }
+        }
 
-        // Add event listener to ensure the script works even if JS loads before HTML
-        window.onload = function () {
-            const subjectSelect = document.getElementById('subject');
-            subjectSelect.addEventListener('change', populateTopics);
-        };
-    </script>
+        // Add event listener to ensure the script works even if JS loads before HTML
+        window.onload = function () {
+            const subjectSelect = document.getElementById('subject');
+            subjectSelect.addEventListener('change', populateTopics);
+        };
+    </script>
 </head>
+
 <body>
-    <div class="container">
-        <div class="card">
-            <h1>Upload PDF</h1>
-            <form action="/success" method="post" enctype="multipart/form-data">
-                <label for="file">Select PDF:</label>
-                <input type="file" name="file" id="file" accept=".pdf" required><br><br>
+    <div class="container">
+        <div class="card">
+            <h1>Upload PDF</h1>
+            <form action="/success" method="post" enctype="multipart/form-data">
+                <label for="file">Select PDF:</label>
+                <input type="file" name="file" id="file" accept=".pdf" required><br><br>
 
-                <label for="exam_type">Select Exam Type:</label>
-                <select name="exam_type" id="exam_type" required>
-                    <option value="JEE">JEE</option>
-                    <option value="NEET">NEET</option>
-                    <option value="GATE">GATE</option>
-                    <option value="Other">Other</option>
-                </select><br><br>
+                <label for="exam_type">Select Exam Type:</label>
+                <select name="exam_type" id="exam_type" required>
+                    <option value="JEE">JEE</option>
+                    <option value="NEET">NEET</option>
+                    <option value="GATE">GATE</option>
+                    <option value="Other">Other</option>
+                </select><br><br>
 
-                <label for="subject">Select Subject:</label>
-                <select name="subject" id="subject" required>
-                    <option value="">Select Subject</option>
-                    <option value="Physics">Physics</option>
-                    <option value="Chemistry">Chemistry</option>
-                    <option value="Mathematics">Mathematics</option>
-                    <option value="Biology">Biology</option>
-                    <option value="Other">Other</option>
-                </select><br><br>
+                <label for="subject">Select Subject:</label>
+                <select name="subject" id="subject" required>
+                    <option value="">Select Subject</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Biology">Biology</option>
+                </select><br><br>
 
-                <label for="topic">Select Topic:</label>
-                <select name="topic" id="topic" required>
-                    <option value="">Select Topic</option>
-                </select><br><br>
+                <label for="topic">Select Topic:</label>
+                <select name="topic" id="topic" required>
+                    <option value="">Select Topic</option>
+                </select><br><br>
 
-                <label for="difficulty_level">Select Difficulty Level:</label>
-                <select name="difficulty_level" id="difficulty_level" required>
-                    <option value="">Select Difficulty Level</option>
-                    <option value="Simple">Simple</option>
-                    <option value="Intermediate">Intermediate</option>
-                    <option value="Hard">Hard</option>
-                </select><br><br>
+                <label for="difficulty_level">Select Difficulty Level:</label>
+                <select name="difficulty_level" id="difficulty_level" required>
+                    <option value="">Select Difficulty Level</option>
+                    <option value="Simple">Simple</option>
+                    <option value="Intermediate">Intermediate</option>
+                    <option value="Hard">Hard</option>
+                </select><br><br>
 
-                <button type="submit">Upload</button>
-            </form>
-        </div>
-    </div>
+                <button type="submit">Upload</button>
+            </form>
+        </div>
+    </div>
 </body>
+
 </html>

@@ -3,7 +3,7 @@ import os
 class Config:
     UPLOAD_FOLDER = 'static/uploads'
     ALLOWED_EXTENSIONS = {'pdf'}  # Allowed file extensions
-    GOOGLE_API_KEY = "AIzaSyAhUVXdf65Q0_S8BSY8x6CN8lnkFx0KH_g"
+    GOOGLE_API_KEY = ""
     SECRET_KEY = 'your_secret_key'  # Replace with your actual secret key
     
     DATABASE_CONFIG = {
